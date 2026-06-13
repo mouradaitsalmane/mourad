@@ -1,0 +1,239 @@
+{
+  "entities": {
+    "UserProfilePublic": {
+      "title": "UserProfilePublic",
+      "description": "Public profile details of a user",
+      "type": "object",
+      "properties": {
+        "displayName": { "type": "string", "description": "Display name of the user" },
+        "bio": { "type": "string", "description": "Short bio description of user skills" },
+        "rating": { "type": "number", "description": "Average rating of the user as a tasker or poster" },
+        "reviewsCount": { "type": "number", "description": "Total reviews received" },
+        "isTasker": { "type": "boolean", "description": "Whether user wants to earn money doing tasks" },
+        "location": { "type": "string", "description": "Standard Rabat region of residence" },
+        "isVerifiedTasker": { "type": "boolean", "description": "Standard Rabat verified badge status" },
+        "isPremium": { "type": "boolean", "description": "Premium user status" },
+        "badgeUnlockedAt": { "type": "string", "format": "date-time", "description": "When verification badge was unlocked" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When profile was created" }
+      },
+      "required": ["displayName", "isTasker", "rating", "reviewsCount", "createdAt"]
+    },
+    "UserProfilePrivate": {
+      "title": "UserProfilePrivate",
+      "description": "Private contact details of a user containing PII",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "description": "Email address of the user" },
+        "phone": { "type": "string", "description": "Phone number, optional for task contact" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "When details were updated" }
+      },
+      "required": ["email", "updatedAt"]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "A job request posted by a user searching for a local hand in Rabat",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "Title of the task" },
+        "description": { "type": "string", "description": "Brief description of work to do" },
+        "budget": { "type": "number", "description": "Budget in Moroccan Dirhams" },
+        "category": { "type": "string", "description": "Category of work" },
+        "location": { "type": "string", "description": "Neighborhood in Rabat" },
+        "dueDate": { "type": "string", "description": "Completion date required" },
+        "status": { "type": "string", "enum": ["open", "assigned", "completed", "cancelled"], "description": "Task status" },
+        "posterId": { "type": "string", "description": "UID of the user who posted the task" },
+        "posterName": { "type": "string", "description": "Name of the user who posted the task" },
+        "taskerId": { "type": "string", "description": "UID of the tasker if assigned" },
+        "taskerName": { "type": "string", "description": "Name of the tasker if assigned" },
+        "offersCount": { "type": "number", "description": "Number of active bids" },
+        "isEscrowFunded": { "type": "boolean", "description": "Whether the escrow is funded" },
+        "escrowStatus": { "type": "string", "description": "Escrow payment status" },
+        "depositTransactionId": { "type": "string", "description": "Transaction reference id for funding" },
+        "fundedAmount": { "type": "number", "description": "Amount funded to escrow" },
+        "fundedAt": { "type": "string", "format": "date-time", "description": "When funds were escrowed" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When task was posted" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "When task was last updated" }
+      },
+      "required": ["title", "description", "budget", "category", "location", "dueDate", "status", "posterId", "posterName", "offersCount", "createdAt", "updatedAt"]
+    },
+    "Offer": {
+      "title": "Offer",
+      "description": "A bid offer placed by a Tasker on an active open task",
+      "type": "object",
+      "properties": {
+        "taskId": { "type": "string", "description": "The task reference id" },
+        "taskerId": { "type": "string", "description": "The UID of the Tasker" },
+        "taskerName": { "type": "string", "description": "Name of the tasker" },
+        "taskerPhoto": { "type": "string", "description": "Photo URL of the tasker" },
+        "amount": { "type": "number", "description": "Offer price in Dirhams" },
+        "message": { "type": "string", "description": "Pitch message sent by tasker" },
+        "status": { "type": "string", "enum": ["pending", "accepted", "declined"], "description": "Offer status" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the offer was placed" }
+      },
+      "required": ["taskId", "taskerId", "taskerName", "amount", "message", "status", "createdAt"]
+    },
+    "Review": {
+      "title": "Review",
+      "description": "A peer review left after completed task work",
+      "type": "object",
+      "properties": {
+        "taskId": { "type": "string", "description": "The associated task" },
+        "reviewerId": { "type": "string", "description": "Who left the review" },
+        "reviewerName": { "type": "string", "description": "Name of the reviewer" },
+        "revieweeId": { "type": "string", "description": "Who received the review" },
+        "rating": { "type": "number", "description": "Rating score (1 to 5)" },
+        "comment": { "type": "string", "description": "Comment content" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When review was submitted" }
+      },
+      "required": ["taskId", "reviewerId", "reviewerName", "revieweeId", "rating", "comment", "createdAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "A real-time direct chat message within a local task project discussion",
+      "type": "object",
+      "properties": {
+        "roomId": { "type": "string", "description": "Room ID referencing the task" },
+        "senderId": { "type": "string", "description": "Sender user UID" },
+        "senderName": { "type": "string", "description": "Sender display name" },
+        "text": { "type": "string", "description": "Text message content" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When message was posted" }
+      },
+      "required": ["roomId", "senderId", "senderName", "text", "createdAt"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Payment transactions recorded via Payzone Moroccan Payment Gateway",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique transaction key" },
+        "userUid": { "type": "string", "description": "UID of paying user" },
+        "userEmail": { "type": "string", "description": "Email of paying user" },
+        "amount": { "type": "number", "description": "Transaction amount in MAD" },
+        "paymentType": { "type": "string", "description": "Purpose of payment" },
+        "taskId": { "type": "string", "description": "Optional task reference ID" },
+        "merchantId": { "type": "string", "description": "Merchant ID on payzone platform" },
+        "status": { "type": "string", "description": "Transaction status" },
+        "gateway": { "type": "string", "description": "Payment gateway brand" },
+        "currency": { "type": "string", "description": "Currency used" },
+        "signature": { "type": "string", "description": "Digital transaction validation signature" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When transaction was logged" }
+      },
+      "required": ["id", "userUid", "userEmail", "amount", "paymentType", "merchantId", "status", "gateway", "currency", "signature", "createdAt"]
+    },
+    "Admin": {
+      "title": "Admin",
+      "description": "Information on back-office administrators",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "assignedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "assignedBy", "createdAt"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "In-app notifications for task operations",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "body": { "type": "string" },
+        "isRead": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "body", "isRead", "createdAt"]
+    },
+    "Report": {
+      "title": "Report",
+      "description": "Security reports or service complaints",
+      "type": "object",
+      "properties": {
+        "reporterId": { "type": "string" },
+        "reportedId": { "type": "string" },
+        "reportType": { "type": "string" },
+        "reason": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["reporterId", "reportedId", "reportType", "reason", "createdAt"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Service categories",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "icon": { "type": "string" }
+      },
+      "required": ["name", "icon"]
+    },
+    "UploadedFile": {
+      "title": "UploadedFile",
+      "description": "Uploaded file or image linked to a user account",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Owner user of the uploaded file" },
+        "fileName": { "type": "string", "description": "The custom filename" },
+        "fileUrl": { "type": "string", "description": "The base64 or URL data of the file" },
+        "fileType": { "type": "string", "description": "The file type" },
+        "fileSize": { "type": "number", "description": "File size in bytes" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the file was uploaded" }
+      },
+      "required": ["userId", "fileName", "fileUrl", "fileType", "fileSize", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfilePublic",
+      "description": "Public profiles of RabatTasker users"
+    },
+    "/users/{userId}/private/info": {
+      "schema": "UserProfilePrivate",
+      "description": "PII contacts restricted to corresponding users only"
+    },
+    "/tasks/{taskId}": {
+      "schema": "Task",
+      "description": "Tasks posted in Rabat"
+    },
+    "/tasks/{taskId}/offers/{offerId}": {
+      "schema": "Offer",
+      "description": "Task offers submitted by local service providers"
+    },
+    "/reviews/{reviewId}": {
+      "schema": "Review",
+      "description": "Public peer feedback review sheets"
+    },
+    "/chatMessages/{messageId}": {
+      "schema": "ChatMessage",
+      "description": "Task project real-time discussion chat index"
+    },
+    "/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Financial records synced via Payzone المغرب"
+    },
+    "/admins/{adminId}": {
+      "schema": "Admin",
+      "description": "Verified system administrators"
+    },
+    "/workers/{workerId}": {
+      "schema": "UserProfilePublic",
+      "description": "Alias representation of verified freelancers"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "In-app notifications log"
+    },
+    "/reports/{reportId}": {
+      "schema": "Report",
+      "description": "Report logs for review"
+    },
+    "/categories/{categoryId}": {
+      "schema": "Category",
+      "description": "Available work categories"
+    },
+    "/files/{fileId}": {
+      "schema": "UploadedFile",
+      "description": "Uploaded user files and attachments"
+    }
+  }
+}
