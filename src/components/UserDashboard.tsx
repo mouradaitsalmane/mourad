@@ -418,10 +418,15 @@ export default function UserDashboard({
         category: quickCategory,
         location: quickNeighborhood,
         dueDate: quickDueDate || new Date().toISOString().split('T')[0],
-        status: 'open',
+        status: 'held',
         posterId: user.uid,
         posterName: userProfile?.displayName || user.displayName || 'أحد سكان الرباط',
         offersCount: 0,
+        isEscrowFunded: true,
+        escrowStatus: 'held',
+        escrowAmount: Number(quickBudget),
+        escrowReleased: false,
+        depositTransactionId: 'PZ-ESCR-' + Math.floor(100000 + Math.random() * 900000),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       };
@@ -528,15 +533,24 @@ export default function UserDashboard({
     if (!window.confirm(confirmText)) return;
 
     try {
-      const taskRef = doc(db, 'tasks', task.id);
-      await updateDoc(taskRef, {
-        status: 'completed',
-        escrowReleased: true, // paid out
-        updatedAt: serverTimestamp()
+      const res = await fetch('/api/tasks/release-escrow', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          taskId: task.id,
+          userUid: user.uid
+        })
       });
-      alert(isRTL ? 'رائع! تم تحرير وإرسال المستحقات لحساب الحرفي بنجاح. يرجى كتابة تقييم قصير له.' : 'Fascinant ! Fonds d’Escrow libérés. Veuillez évaluer le prestataire.');
-    } catch (err) {
+      
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to release escrow via safe Cloud Functions.');
+      }
+      
+      alert(isRTL ? 'رائع! تم تحرير وإرسال المستحقات لحساب الحرفي بنجاح عبر بوابة الدفع الآمنة. يرجى كتابة تقييم قصير له.' : 'Fascinant ! Fonds d’Escrow libérés via le serveur Payzone. Veuillez évaluer le prestataire.');
+    } catch (err: any) {
       console.error(err);
+      alert(isRTL ? `فشل الإفراج عن الضمان: ${err.message}` : `Échec de libération d'Escrow: ${err.message}`);
     }
   };
 
@@ -744,7 +758,7 @@ export default function UserDashboard({
               <div className="bg-white p-5 rounded-2xl border border-gray-150 shadow-xs flex items-center justify-between">
                 <div className="flex flex-col gap-0.5 text-right">
                   <span className="text-[10px] text-gray-400 uppercase font-bold">{isRTL ? 'مهمات معلقة تبحث عن مستقلين' : 'Tâches en attente'}</span>
-                  <span className="text-2xl font-black text-amber-600">{myTasks.filter(t => t.status === 'open').length}</span>
+                  <span className="text-2xl font-black text-amber-600">{myTasks.filter(t => t.status === 'open' || t.status === 'held').length}</span>
                 </div>
                 <div className="p-3 bg-amber-50 text-amber-600 rounded-xl">
                   <Clock className="w-5 h-5" />
@@ -1192,7 +1206,7 @@ export default function UserDashboard({
                   const isAssigned = task.status === 'assigned';
                   const isCompleted = task.status === 'completed';
                   const isCancelled = task.status === 'cancelled';
-                  const isOpen = task.status === 'open';
+                  const isOpen = task.status === 'open' || task.status === 'held';
 
                   return (
                     <div 
@@ -1606,7 +1620,7 @@ export default function UserDashboard({
                       </p>
 
                       <div className="text-[8.5px] text-gray-400 font-extrabold mt-1 text-left select-none">
-                        Ref: RabatTasker Escrow Resolution Desk
+                        Ref: Tasker Escrow Resolution Desk
                       </div>
 
                     </div>

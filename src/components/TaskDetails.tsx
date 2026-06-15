@@ -217,14 +217,25 @@ export default function TaskDetails({
     if (!user || task.posterId !== user.uid) return;
     try {
       setBiddingLoading(true);
-      const taskRef = doc(db, 'tasks', task.id);
-      await updateDoc(taskRef, {
-        status: 'completed',
-        updatedAt: serverTimestamp()
+      
+      const res = await fetch('/api/tasks/release-escrow', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          taskId: task.id,
+          userUid: user.uid
+        })
       });
+      
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to release escrow via secure Cloud Functions.');
+      }
+      
       onStatusChange();
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `tasks/${task.id}`);
+    } catch (error: any) {
+      console.error('Release escrow error:', error);
+      setBiddingError(error.message || 'Error occurred during secure escrow release.');
     } finally {
       setBiddingLoading(false);
     }
@@ -343,9 +354,15 @@ export default function TaskDetails({
                   <h2 className="text-xl font-black text-gray-900 leading-snug">
                     {task.title}
                   </h2>
-                  <span className="text-xs text-gray-400 font-medium flex items-center gap-1">
+                  <span className="text-xs text-gray-400 font-medium flex items-center gap-1.5 flex-wrap">
                     <User className="w-3.5 h-3.5 inline text-gray-400" />
                     <span>{t.posterBadge}: <b>{task.posterName}</b></span>
+                    {(task as any).verifiedClient && (
+                      <span className="bg-sky-100 text-sky-800 text-[9.5px] px-2 py-0.5 rounded-lg font-black flex items-center gap-0.5 shrink-0 shadow-xs border border-sky-200">
+                        <ShieldCheck className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                        <span>{lang === 'ar' ? 'صاحب عمل موثق (CIN)' : 'Client Vérifié (CIN)'}</span>
+                      </span>
+                    )}
                   </span>
                 </div>
 
@@ -365,7 +382,8 @@ export default function TaskDetails({
                   <span>{task.dueDate}</span>
                 </span>
                 <span className="text-sky-700 bg-sky-50 border border-sky-100 px-2 py-0.5 rounded-lg text-[10px]">
-                  {task.status === 'open' ? t.statusOpen :
+                  {task.status === 'held' ? (lang === 'ar' ? 'ضمان مؤمن (Escrow)' : 'Garantie Sécurisée') :
+                   task.status === 'open' ? t.statusOpen :
                    task.status === 'assigned' ? t.statusAssigned :
                    task.status === 'completed' ? t.statusCompleted : t.statusCancelled}
                 </span>
@@ -556,7 +574,7 @@ export default function TaskDetails({
             )}
 
             {/* 7. Display bids and offers list */}
-            {task.status === 'open' && (
+            {(task.status === 'open' || task.status === 'held') && (
               <div className="flex flex-col gap-4 border-t border-gray-100 pt-5 pr-1">
                 <h4 className="text-sm font-bold text-gray-800 flex items-center gap-1.5 justify-start">
                   <MessageSquare className="w-4 h-4 text-sky-600" />
@@ -584,8 +602,8 @@ export default function TaskDetails({
                             className="w-9 h-9 rounded-full object-cover ring-2 ring-gray-100 shrink-0"
                           />
                           <div className="flex flex-col text-right">
-                            <span className="text-xs font-bold text-gray-800">{off.taskerName}</span>
-                            <p className="text-xs text-gray-500 leading-normal mt-1 max-w-sm">"{off.message}"</p>
+                             <span className="text-xs font-bold text-gray-800">{off.taskerName}</span>
+                             <p className="text-xs text-gray-500 leading-normal mt-1 max-w-sm">"{off.message}"</p>
                           </div>
                         </div>
 
@@ -595,7 +613,7 @@ export default function TaskDetails({
                             <span className="text-[9px] text-gray-400 font-medium">سعر عرض الخدمة</span>
                           </div>
 
-                          {isPoster && task.status === 'open' && (
+                          {isPoster && (task.status === 'open' || task.status === 'held') && (
                             <button
                               onClick={() => handleAcceptOffer(off)}
                               className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors cursor-pointer"

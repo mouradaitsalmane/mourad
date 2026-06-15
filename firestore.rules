@@ -352,5 +352,10 @@ service cloud.firestore {
       allow delete: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
     }
 
+    // 15. Audit Logs for Admin tracking
+    match /audit_logs/{logId} {
+      allow read, list, write: if isAdmin();
+    }
+
   }
 }

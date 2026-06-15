@@ -8,7 +8,9 @@ export const RABAT_NEIGHBORHOODS: RabatNeighborhood[] = [
   { id: 'yacoub_mansour', ar: 'يعقوب المنصور', fr: 'Yaâcoub El Mansour' },
   { id: 'youssoufia', ar: 'اليوسفية', fr: 'Youssoufia' },
   { id: 'medina', ar: 'المدينة القديمة', fr: 'Médina' },
-  { id: 'el_menzeh', ar: 'المنزه', fr: 'El Menzeh' }
+  { id: 'el_menzeh', ar: 'المنزه', fr: 'El Menzeh' },
+  { id: 'temara', ar: 'تمارة', fr: 'Témara' },
+  { id: 'sale', ar: 'سلا', fr: 'Salé' }
 ];
 
 export const SERVICE_CATEGORIES: ServiceCategory[] = [
@@ -25,7 +27,7 @@ export const SERVICE_CATEGORIES: ServiceCategory[] = [
 export const TRANSLATIONS = {
   ar: {
     appName: 'Tasker',
-    tagline: 'منصة Tasker المحلية لإنجاز مهامكم اليومية بكل ثقة وسهولة المماثلة لأيرتاسكر',
+    tagline: 'منصة Tasker المحلية لإنجاز مهامكم اليومية بكل ثقة وأمان وسلاسة',
     postTaskBtn: 'اضغط لنشر مهمة جديدة',
     filterCategory: 'تصفية حسب الفئة',
     filterNeighborhood: 'تصفية حسب الحي',
@@ -81,7 +83,7 @@ export const TRANSLATIONS = {
   },
   fr: {
     appName: 'Tasker',
-    tagline: 'La plateforme locale de Rabat pour confier vos tâches quotidiennes en toute confiance, style Airtasker.',
+    tagline: 'La plateforme locale de Rabat pour confier vos tâches quotidiennes en toute confiance.',
     postTaskBtn: 'Publier une tâche',
     filterCategory: 'Filtrer par Catégorie',
     filterNeighborhood: 'Filtrer par Quartier',

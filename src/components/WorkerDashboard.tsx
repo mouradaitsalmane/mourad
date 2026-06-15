@@ -204,7 +204,7 @@ export default function WorkerDashboard({
 
       snap.forEach((docSnap) => {
         const t = { id: docSnap.id, ...docSnap.data() } as Task;
-        if (t.status === 'open') {
+        if (t.status === 'open' || t.status === 'held') {
           openList.push(t);
         } else if (t.status === 'assigned' && t.taskerId === user?.uid) {
           assignedList.push(t);

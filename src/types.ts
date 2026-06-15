@@ -28,7 +28,7 @@ export interface Task {
   location: string; // Rabat neighborhood
   dueDate: string;
   dueTime?: string;
-  status: 'open' | 'assigned' | 'completed' | 'cancelled';
+  status: 'open' | 'held' | 'assigned' | 'completed' | 'cancelled';
   posterId: string;
   posterName: string;
   taskerId?: string;

@@ -259,7 +259,7 @@ export default function UserProfileSettings({
                   </div>
                   <div className="flex flex-col">
                     <span className="text-xs font-extrabold text-sky-950 flex items-center gap-1">
-                      {lang === 'ar' ? 'توثيق الحساب بالرباط وشعار المستقل المحترف' : 'Badge de confiance RabatTasker'}
+                      {lang === 'ar' ? 'شعار توثيق حساب Tasker المحترف' : 'Badge de confiance Tasker'}
                       {isVerified && (
                         <span className="bg-emerald-100 text-emerald-800 text-[9px] px-1.5 py-0.5 rounded-md font-black flex items-center gap-0.5">
                           ✓ {lang === 'ar' ? 'موثق' : 'Vérifié'}

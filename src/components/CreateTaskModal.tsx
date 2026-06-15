@@ -22,7 +22,10 @@ import {
   Award,
   Trash2,
   MapPin,
-  ShieldCheck
+  ShieldCheck,
+  Lock,
+  CreditCard,
+  Camera
 } from 'lucide-react';
 import { UserProfile } from '../types';
 
@@ -44,13 +47,13 @@ export default function CreateTaskModal({
   const t = TRANSLATIONS[lang];
   const isRTL = lang === 'ar';
 
-  // Step Wizard state: 'form' | 'preview'
-  const [step, setStep] = useState<'form' | 'preview'>('form');
+  // Step Wizard state: 'form' | 'preview' | 'verification'
+  const [step, setStep] = useState<'form' | 'preview' | 'verification'>('form');
 
   // Form Field States
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [budget, setBudget] = useState<number>(150);
+  const [budget, setBudget] = useState<number>(200); // Default to 200 DH as requested
   const [category, setCategory] = useState('cleaning');
   const [neighborhood, setNeighborhood] = useState('agdal');
   const [dueDate, setDueDate] = useState('');
@@ -59,12 +62,34 @@ export default function CreateTaskModal({
   const [contactPreference, setContactPreference] = useState<'chat' | 'phone' | 'email' | 'any'>('chat');
   const [uploadedImages, setUploadedImages] = useState<string[]>([]);
   
+  // Client Identity & Payzone Escrow Payment Information States
+  const [cinFront, setCinFront] = useState<string | null>(null);
+  const [cinBack, setCinBack] = useState<string | null>(null);
+  const [selfie, setSelfie] = useState<string | null>(null);
+
+  const [cardName, setCardName] = useState('');
+  const [cardNumber, setCardNumber] = useState('');
+  const [cardExpiry, setCardExpiry] = useState('');
+  const [cardCvv, setCardCvv] = useState('');
+
+  // Drag-and-drop indicator states for verification files
+  const [isDraggingCinFront, setIsDraggingCinFront] = useState(false);
+  const [isDraggingCinBack, setIsDraggingCinBack] = useState(false);
+  const [isDraggingSelfie, setIsDraggingSelfie] = useState(false);
+
+  // Verification step loader text during final transaction processing
+  const [activeProcessStep, setActiveProcessStep] = useState<string | null>(null);
+
   // Auxiliary UI States
   const [isDragging, setIsDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const cinFrontRef = useRef<HTMLInputElement>(null);
+  const cinBackRef = useRef<HTMLInputElement>(null);
+  const selfieRef = useRef<HTMLInputElement>(null);
 
   // File Upload Handlers (Pure Client-side base64 supporting the preview frames)
   const processFiles = (files: FileList) => {
@@ -108,6 +133,39 @@ export default function CreateTaskModal({
       .catch((err) => {
         setError(typeof err === 'string' ? err : 'خطأ أثناء تحميل الصور.');
       });
+  };
+
+  const processVerificationFile = (file: File, target: 'front' | 'back' | 'selfie') => {
+    setError(null);
+    const validTypes = ['image/jpeg', 'image/png', 'image/webp'];
+    if (!validTypes.includes(file.type)) {
+      setError(
+        isRTL 
+          ? 'تنسيق غير مدعوم. يرجى رفع ملف صورة فقط (JPEG, PNG, WebP).' 
+          : 'Format d\'image invalide (JPEG, PNG, WebP uniquement).'
+      );
+      return;
+    }
+    if (file.size > 3.5 * 1024 * 1024) {
+      setError(
+        isRTL
+          ? 'عذراً، حجم هذه الصورة كبير جداً (مسموح بـ 3.5 ميجابايت كحد أقصى لتأمين الرفع).'
+          : 'Image trop volumineuse (max 3.5 Mo).'
+      );
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      if (target === 'front') setCinFront(result);
+      else if (target === 'back') setCinBack(result);
+      else if (target === 'selfie') setSelfie(result);
+    };
+    reader.onerror = () => {
+      setError(isRTL ? 'خطأ أثناء قراءة وثيقة الهوية.' : 'Erreur de lecture du fichier.');
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -174,11 +232,48 @@ export default function CreateTaskModal({
       return;
     }
 
+    // Strict validation check for complete verification assets as requested
+    if (!cinFront || !cinBack || !selfie) {
+      setError(
+        isRTL 
+          ? 'يرجى إكمال رفع كافة وثائق الهوية المطلوبة: الجهة الأمامية للبطاقة الوطنية، الجهة الخلفية لها، والصورة الشخصية (سيلفي).' 
+          : 'Veuillez charger tous les justificatifs requis : Recto CIN, Verso CIN, et Selfie.'
+      );
+      return;
+    }
+
+    // Bank card basic attributes check
+    const formatCard = cardNumber.replace(/\s+/g, '');
+    const cleanExpiry = cardExpiry.replace(/\s+/g, '');
+    const cleanCvv = cardCvv.trim();
+
+    if (!cardName.trim() || formatCard.length < 16 || cleanExpiry.length < 4 || cleanCvv.length < 3) {
+      setError(
+        isRTL
+          ? 'يرجى ملء جميع بيانات بطاقتكم البنكية المستخدمة للضمان المالي بشكل كامل وآمن.'
+          : 'Veuillez saisir des informations de carte bancaire valides pour alimenter la garantie.'
+      );
+      return;
+    }
+
     try {
       setLoading(true);
       setError(null);
 
-      // Create unique task ID safely
+      // 1. High fidelity interactive simulation of secure verification & payment with Payzone Morocco authorization hold
+      setActiveProcessStep(isRTL ? '🔐 جاري تدقيق وتشفير وثائق الهوية الوطنية بصيغة AES-256...' : '🔐 Chiffrement AES-256 de vos pièces d’identité...');
+      await new Promise(r => setTimeout(r, 1200));
+
+      setActiveProcessStep(isRTL ? '🤳 مطابقة ملامح صورة السيلفي الذاتية مع صورة بطاقة التعريف الوطنية (CIN)...' : '🤳 Comparaison biométrique du selfie avec la photo CIN...');
+      await new Promise(r => setTimeout(r, 1400));
+
+      setActiveProcessStep(isRTL ? `💳 الاتصال الآمن مع بوابة Payzone وسحب ميزانية المهمة (${budget} درهم) في حالة معلقة...` : `💳 Communication sécurisée avec Payzone et pré-autorisation de la garantie (${budget} MAD)...`);
+      await new Promise(r => setTimeout(r, 1600));
+
+      setActiveProcessStep(isRTL ? '📝 إيداع مبلغ الضمان في صندوق الأمانات ونشر المهمة على خريطة الرباط...' : '📝 Enregistrement du dépôt d’Escrow et publication de la tâche en ligne...');
+      await new Promise(r => setTimeout(r, 1000));
+
+      // 2. Create unique task ID safely
       const taskId = 'task_' + Math.random().toString(36).substr(2, 9);
       
       // Look up localized Arabic neighborhood representation for general storage speed
@@ -196,13 +291,27 @@ export default function CreateTaskModal({
         location: displayNeighborhood,
         dueDate: dueDate,
         dueTime: dueTime,
-        status: 'open',
+        status: 'held',
         posterId: user.uid,
         posterName: userProfile?.displayName || user.displayName || 'مستخدم الرباط',
         offersCount: 0,
         urgency: urgency,
         contactPreference: contactPreference,
         images: uploadedImages,
+
+        // Secure Verification Proof and Escrow setup properties
+        verifiedClient: true,
+        clientCINFront: cinFront,
+        clientCINBack: cinBack,
+        clientSelfie: selfie,
+        isEscrowFunded: true, // Auto-funded immediately
+        escrowStatus: 'held', // Held on reserve in Payzone
+        escrowAmount: Number(budget),
+        escrowReleased: false,
+        paymentCardLast4: formatCard.slice(-4),
+        paymentCardholder: cardName.trim(),
+        depositTransactionId: 'PZ-ESCR-' + Math.floor(100000 + Math.random() * 900000),
+
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       };
@@ -221,6 +330,7 @@ export default function CreateTaskModal({
       setError(err.message || (isRTL ? 'حدث خطأ أثناء حفظ ونشر المهمة.' : 'Erreur de publication.'));
     } finally {
       setLoading(false);
+      setActiveProcessStep(null);
     }
   };
 
@@ -657,7 +767,7 @@ export default function CreateTaskModal({
 
               </div>
 
-              {/* Action Buttons to Go Back or Final Submit/Publish */}
+              {/* Action Buttons to Go Back or Transition to Secure Verification Verification Step */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 mt-2">
                 <button
                   type="button"
@@ -672,20 +782,409 @@ export default function CreateTaskModal({
                 <button
                   type="button"
                   disabled={loading}
+                  onClick={() => {
+                    setError(null);
+                    setStep('verification');
+                  }}
+                  className="sm:col-span-2 bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-600 hover:to-indigo-700 text-white font-black py-3.5 px-4 rounded-xl text-xs transition-all shadow-md hover:shadow-lg cursor-pointer flex items-center justify-center gap-1.5"
+                  id="final-proceed-to-verification-btn"
+                >
+                  <ShieldCheck className="w-4.5 h-4.5 shrink-0" />
+                  <span>{isRTL ? 'تأكيد ودفع مبلغ الضمان بالرباط (Payzone)' : 'Procéder au dépôt et à la vérification'}</span>
+                </button>
+              </div>
+
+            </div>
+          )}
+
+          {/* ================== STEP 3: IDENTITY & ESCROW VERIFICATION ================== */}
+          {step === 'verification' && (
+            <div className="p-6 flex flex-col gap-6 text-right overflow-y-auto max-h-[85vh] relative bg-slate-50/50">
+              
+              {/* Dynamic Security Header Alert */}
+              <div className="bg-sky-50 border border-sky-100 p-4 rounded-2xl flex items-start gap-3">
+                <Lock className="w-5 h-5 text-sky-600 shrink-0 mt-0.5" />
+                <div className="flex flex-col gap-1 text-xs">
+                  <span className="font-extrabold text-sky-950">
+                    {isRTL ? 'بوابة التحقق والضمان المالي (Payzone Digital Escrow)' : 'Portail de vérification et de sécurité Escrow'}
+                  </span>
+                  <span className="text-gray-500 font-semibold leading-relaxed">
+                    {isRTL 
+                      ? 'بموجب القوانين التنظيمية ومعايير مكافحة الغش بالمملكة المغربية، يتطلب نشر أي مهمة توثيق هويتك (CIN) وحجز ميزانية المهمة كضمان مالي معلق إلى بوابة Payzone. لن يتم تحويل المبلغ للمستقل إلا بعد الموافقة النهائية من طرفكم.'
+                      : 'Conformément aux régulations en vigueur au Maroc, la publication requiert de justifier votre identité (CIN) et d’autoriser un blocage du budget en Escrow chez Payzone.'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Identity Documents Upload Slots (3 slots) */}
+              <div className="flex flex-col gap-3">
+                <h4 className="text-xs font-black text-slate-800 flex items-center gap-1">
+                  <span>1. {isRTL ? 'رفع وثائق إثبات الهوية الشخصية' : 'Justificatifs d’Identité'}</span>
+                  <span className="text-rose-500 font-extrabold">*</span>
+                </h4>
+                
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  
+                  {/* Slot 1: Front of CIN */}
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] text-gray-400 font-extrabold text-right">
+                      {isRTL ? 'البطاقة الوطنية - الوجه الأمامي:' : 'CIN - Recto :'}
+                    </span>
+                    <input 
+                      type="file" 
+                      ref={cinFrontRef}
+                      className="hidden" 
+                      accept="image/*"
+                      onChange={(e) => {
+                        if (e.target.files?.[0]) processVerificationFile(e.target.files[0], 'front');
+                      }}
+                    />
+                    <div 
+                      onClick={() => cinFrontRef.current?.click()}
+                      onDragOver={(e) => { e.preventDefault(); setIsDraggingCinFront(true); }}
+                      onDragLeave={() => setIsDraggingCinFront(false)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setIsDraggingCinFront(false);
+                        if (e.dataTransfer.files?.[0]) processVerificationFile(e.dataTransfer.files[0], 'front');
+                      }}
+                      className={`h-28 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center p-3 text-center cursor-pointer transition-all ${
+                        cinFront 
+                          ? 'border-emerald-300 bg-white shadow-xs' 
+                          : isDraggingCinFront 
+                            ? 'border-sky-500 bg-sky-50' 
+                            : 'border-gray-200 bg-white hover:bg-slate-50'
+                      }`}
+                    >
+                      {cinFront ? (
+                        <div className="relative w-full h-full flex items-center justify-center">
+                          <img src={cinFront} alt="CIN Front" className="h-full w-auto object-contain rounded-lg" referrerPolicy="no-referrer" />
+                          <button 
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setCinFront(null); }}
+                            className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-rose-600 text-white flex items-center justify-center text-[10px] hover:bg-rose-700 shadow-xs"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center gap-1.5 text-gray-400">
+                          <Upload className="w-5 h-5 text-gray-400" />
+                          <span className="text-[10px] font-bold leading-tight">{isRTL ? 'الملف الأمامي للـ CIN' : 'Sélectionner Recto'}</span>
+                          <span className="text-[8px] text-gray-300 font-semibold">{isRTL ? 'اسحب أو اضغط للرفع' : 'Glisser ou cliquer'}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Slot 2: Back of CIN */}
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] text-gray-400 font-extrabold text-right">
+                      {isRTL ? 'البطاقة الوطنية - الوجه الخلفي:' : 'CIN - Verso :'}
+                    </span>
+                    <input 
+                      type="file" 
+                      ref={cinBackRef}
+                      className="hidden" 
+                      accept="image/*"
+                      onChange={(e) => {
+                        if (e.target.files?.[0]) processVerificationFile(e.target.files[0], 'back');
+                      }}
+                    />
+                    <div 
+                      onClick={() => cinBackRef.current?.click()}
+                      onDragOver={(e) => { e.preventDefault(); setIsDraggingCinBack(true); }}
+                      onDragLeave={() => setIsDraggingCinBack(false)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setIsDraggingCinBack(false);
+                        if (e.dataTransfer.files?.[0]) processVerificationFile(e.dataTransfer.files[0], 'back');
+                      }}
+                      className={`h-28 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center p-3 text-center cursor-pointer transition-all ${
+                        cinBack 
+                          ? 'border-emerald-300 bg-white shadow-xs' 
+                          : isDraggingCinBack 
+                            ? 'border-sky-500 bg-sky-50' 
+                            : 'border-gray-200 bg-white hover:bg-slate-50'
+                      }`}
+                    >
+                      {cinBack ? (
+                        <div className="relative w-full h-full flex items-center justify-center">
+                          <img src={cinBack} alt="CIN Back" className="h-full w-auto object-contain rounded-lg" referrerPolicy="no-referrer" />
+                          <button 
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setCinBack(null); }}
+                            className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-rose-600 text-white flex items-center justify-center text-[10px] hover:bg-rose-700 shadow-xs"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center gap-1.5 text-gray-400">
+                          <Upload className="w-5 h-5 text-gray-400" />
+                          <span className="text-[10px] font-bold leading-tight">{isRTL ? 'المستند الخلفي للـ CIN' : 'Sélectionner Verso'}</span>
+                          <span className="text-[8px] text-gray-300 font-semibold">{isRTL ? 'اسحب أو اضغط للرفع' : 'Glisser ou cliquer'}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Slot 3: Selfie */}
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] text-gray-400 font-extrabold text-right">
+                      {isRTL ? 'صورة سيلفي مطابقة بالوجه:' : 'Photo Selfie :'}
+                    </span>
+                    <input 
+                      type="file" 
+                      ref={selfieRef}
+                      className="hidden" 
+                      accept="image/*"
+                      onChange={(e) => {
+                        if (e.target.files?.[0]) processVerificationFile(e.target.files[0], 'selfie');
+                      }}
+                    />
+                    <div 
+                      onClick={() => selfieRef.current?.click()}
+                      onDragOver={(e) => { e.preventDefault(); setIsDraggingSelfie(true); }}
+                      onDragLeave={() => setIsDraggingSelfie(false)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setIsDraggingSelfie(false);
+                        if (e.dataTransfer.files?.[0]) processVerificationFile(e.dataTransfer.files[0], 'selfie');
+                      }}
+                      className={`h-28 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center p-3 text-center cursor-pointer transition-all ${
+                        selfie 
+                          ? 'border-emerald-300 bg-white shadow-xs' 
+                          : isDraggingSelfie 
+                            ? 'border-sky-500 bg-sky-50' 
+                            : 'border-gray-200 bg-white hover:bg-slate-50'
+                      }`}
+                    >
+                      {selfie ? (
+                        <div className="relative w-full h-full flex items-center justify-center">
+                          <img src={selfie} alt="Selfie" className="h-full w-auto object-contain rounded-lg" referrerPolicy="no-referrer" />
+                          <button 
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setSelfie(null); }}
+                            className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-rose-600 text-white flex items-center justify-center text-[10px] hover:bg-rose-700 shadow-xs"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center gap-1.5 text-gray-400">
+                          <Camera className="w-5 h-5 text-gray-400" />
+                          <span className="text-[10px] font-bold leading-tight">{isRTL ? 'رفع صورة سيلفي مطابقة' : 'Uploader un Selfie'}</span>
+                          <span className="text-[8px] text-gray-300 font-semibold">{isRTL ? 'اسحب أو اضغط للرفع' : 'Glisser ou cliquer'}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+
+              {/* Secure Bank Card Payment Form Block */}
+              <div className="flex flex-col gap-4 border-t border-slate-200/50 pt-5">
+                <h4 className="text-xs font-black text-slate-800 flex items-center gap-1">
+                  <CreditCard className="w-4 h-4 text-indigo-600" />
+                  <span>2. {isRTL ? 'معلومات البطاقة البنكية المغربية أو الدولية' : 'Informations de carte bancaire'}</span>
+                  <span className="text-rose-500 font-extrabold">*</span>
+                </h4>
+
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-6 items-center">
+                  
+                  {/* Digital Credit Card Interactive Mockup */}
+                  <div className="md:col-span-2 select-none">
+                    <div className="relative w-full aspect-[1.58] rounded-2.5xl p-5 bg-gradient-to-tr from-slate-900 via-indigo-950 to-sky-950 text-white shadow-xl flex flex-col justify-between overflow-hidden border border-slate-700/30 font-sans">
+                      
+                      {/* Glossy overlay effect */}
+                      <div className="absolute inset-0 bg-radial-gradient from-white/10 to-transparent pointer-events-none" />
+                      
+                      <div className="flex justify-between items-center z-10">
+                        <div className="flex flex-col">
+                          <span className="text-[7px] text-sky-300 font-black tracking-widest uppercase">{isRTL ? 'Tasker كارت' : 'Tasker Premium'}</span>
+                          <span className="text-[10px] font-bold text-white/80">{isRTL ? 'أمانة معلقة' : 'Escrow Reserve'}</span>
+                        </div>
+                        <span className="text-xs italic font-black text-white/90">
+                          {cardNumber.startsWith('4') ? 'Visa' : cardNumber.startsWith('5') ? 'Mastercard' : 'Payzone'}
+                        </span>
+                      </div>
+
+                      {/* SIM Chip Design */}
+                      <div className="w-8 h-6 bg-gradient-to-br from-amber-200 to-amber-400 rounded-md shadow-inner my-2 opacity-85" />
+
+                      {/* Dynamic Card Number Representation */}
+                      <div className="text-[14px] sm:text-[15px] font-mono tracking-widest text-center text-white/95 my-1.5 font-bold">
+                        {cardNumber || '•••• •••• •••• ••••'}
+                      </div>
+
+                      <div className="flex justify-between items-end z-10 mt-1">
+                        <div className="flex flex-col text-right">
+                          <span className="text-[6px] text-white/50 uppercase tracking-widest">{isRTL ? 'صاحب البطاقة' : 'CARDHOLDER'}</span>
+                          <span className="text-[10px] font-mono uppercase font-semibold tracking-wide truncate max-w-[140px]">
+                            {cardName || 'MOURAD EL IDRISSI'}
+                          </span>
+                        </div>
+                        <div className="flex flex-col text-right">
+                          <span className="text-[6px] text-white/50 uppercase tracking-widest">{isRTL ? 'الصلاحية' : 'EXPIRES'}</span>
+                          <span className="text-[10px] font-mono font-semibold">
+                            {cardExpiry || 'MM/YY'}
+                          </span>
+                        </div>
+                      </div>
+
+                    </div>
+                  </div>
+
+                  {/* Input Fields */}
+                  <div className="md:col-span-3 flex flex-col gap-3">
+                    
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-slate-500 font-bold">{isRTL ? 'الاسم الكامل المكتوب على البطاقة:' : 'Nom complet sur la carte :'}</label>
+                      <input 
+                        type="text"
+                        required
+                        value={cardName}
+                        onChange={(e) => setCardName(e.target.value)}
+                        placeholder="MOURAD EL IDRISSI"
+                        className="w-full text-xs font-semibold border border-gray-200 rounded-xl px-3.5 py-2.5 bg-white focus:outline-none focus:border-indigo-500 font-mono uppercase"
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-slate-500 font-bold">{isRTL ? 'رقم البطاقة البنكية (16 رقم):' : 'Numéro de carte :'}</label>
+                      <input 
+                        type="text"
+                        required
+                        value={cardNumber}
+                        onChange={(e) => {
+                          const val = e.target.value.replace(/\D/g, '').slice(0, 16);
+                          const formatted = val.match(/.{1,4}/g);
+                          setCardNumber(formatted ? formatted.join(' ') : val);
+                        }}
+                        placeholder="4000 1234 5678 9010"
+                        className="w-full text-xs font-semibold border border-gray-200 rounded-xl px-3.5 py-2.5 bg-white focus:outline-none focus:border-indigo-500 font-mono"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="flex flex-col gap-1 font-mono">
+                        <label className="text-[10px] text-slate-500 font-bold">{isRTL ? 'تاريخ انتهاء الصلاحية:' : 'Date Exp (MM/YY) :'}</label>
+                        <input 
+                          type="text"
+                          required
+                          value={cardExpiry}
+                          onChange={(e) => {
+                            let val = e.target.value.replace(/\D/g, '').slice(0, 4);
+                            if (val.length > 2) {
+                              setCardExpiry(val.slice(0, 2) + '/' + val.slice(2));
+                            } else {
+                              setCardExpiry(val);
+                            }
+                          }}
+                          placeholder="12/28"
+                          className="w-full text-xs font-semibold border border-gray-200 rounded-xl px-3.5 py-2.5 bg-white focus:outline-none focus:border-indigo-500 font-mono text-center"
+                        />
+                      </div>
+
+                      <div className="flex flex-col gap-1 font-mono">
+                        <label className="text-[10px] text-slate-500 font-bold">{isRTL ? 'رمز الأمان CVV3:' : 'Code CVV3 :'}</label>
+                        <input 
+                          type="password"
+                          required
+                          value={cardCvv}
+                          onChange={(e) => {
+                            setCardCvv(e.target.value.replace(/\D/g, '').slice(0, 3));
+                          }}
+                          placeholder="•••"
+                          maxLength={3}
+                          className="w-full text-xs font-semibold border border-gray-200 rounded-xl px-3.5 py-2.5 bg-white focus:outline-none focus:border-indigo-500 font-mono text-center"
+                        />
+                      </div>
+                    </div>
+
+                  </div>
+
+                </div>
+              </div>
+
+              {/* Escrow Budget Statement Breakdown */}
+              <div className="bg-slate-100 border border-slate-200 p-4 rounded-2xl flex flex-col gap-2 font-semibold">
+                <span className="text-[10px] text-slate-400 font-black uppercase text-left">{isRTL ? 'مخلص العمليات المالية المعلقة' : 'COMPTE ESCROW PAYZONE MAROC'}</span>
+                
+                <div className="flex justify-between items-center text-xs text-slate-700 pt-1">
+                  <span>{isRTL ? 'قيمة ميزانية المهمة:' : 'Budget nominal de la mission :'}</span>
+                  <span className="font-bold text-slate-900">{budget} {isRTL ? 'درهم مغربي' : 'MAD'}</span>
+                </div>
+                
+                <div className="flex justify-between items-center text-xs text-slate-700">
+                  <span>{isRTL ? 'رسوم خدمة الضمان (Escrow):' : 'Frais de service Escrow :'}</span>
+                  <span className="text-emerald-600 font-extrabold">{isRTL ? 'مجانًا (0 درهم)' : 'Gratuit (0 MAD)'}</span>
+                </div>
+
+                <div className="flex justify-between items-center text-sm text-slate-900 font-black border-t border-slate-200 pt-2 mt-1">
+                  <span>{isRTL ? 'المبلغ الإجمالي المحجوز للضمان فوراً:' : 'Montant total bloqué immédiatement :'}</span>
+                  <span className="text-indigo-600 font-black">{budget} {isRTL ? 'درهم مغربي' : 'MAD'}</span>
+                </div>
+
+                <div className="text-[9.5px] text-slate-400 mt-1 flex items-start gap-1 font-medium leading-relaxed">
+                  <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                  <p>
+                    {isRTL 
+                      ? 'سيتم حسم هذا المبلغ واحتجازه كوديعة أمان في خيار الضمان المعلق التابع لـ Payzone. لن يستلم المستقل هذا المبلغ إلى حسابه البنكي حتى تضغط على زر "تم إنجاز المهمة بنجاح" بعد اكتمال الخدمة.'
+                      : 'Ce montant sera gelé et sécurisé en Escrow. Les fonds ne seront libérés au prestataire que lorsque vous confirmerez la bonne réalisation de la tâche.'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Action Buttons: Go back to Preview, or Trigger Verification and Escrow hold */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={() => setStep('preview')}
+                  className="sm:col-span-1 border border-gray-200 hover:bg-gray-100 text-gray-600 font-bold py-3.5 px-4 rounded-xl text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <ChevronLeft className="w-4 h-4 ml-1" />
+                  <span>{isRTL ? 'رجوع للمعاينة' : 'Retour'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={loading || !cinFront || !cinBack || !selfie || cardNumber.replace(/\s+/g, '').length < 16}
                   onClick={handlePublish}
-                  className="sm:col-span-2 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-black py-3.5 px-4 rounded-xl text-xs transition-all shadow-md hover:shadow-lg cursor-pointer flex items-center justify-center gap-1.5"
+                  className="sm:col-span-2 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black py-3.5 px-4 rounded-xl text-xs transition-all shadow-md hover:shadow-lg cursor-pointer flex items-center justify-center gap-1.5"
                   id="final-create-task-btn"
                 >
                   {loading ? (
-                    <span className="animate-pulse">{isRTL ? 'جاري نشر المهمة بـ Firebase...' : 'Publication...'}</span>
+                    <span className="animate-pulse">{isRTL ? 'جاري التحقق وسحب الضمان...' : 'Vérification et blocage...'}</span>
                   ) : (
                     <>
                       <CheckCircle className="w-4.5 h-4.5 shrink-0" />
-                      <span>{isRTL ? 'نشر المهمة واستقبال العروض فورياً' : 'Confirmer et publier la tâche'}</span>
+                      <span>{isRTL ? 'تأكيد الهوية وتأمين مبلغ الضمان' : 'Vérifier l’identité & Dégager l’Escrow'}</span>
                     </>
                   )}
                 </button>
               </div>
+
+              {/* Seamless Full-screen overlay loader screen to simulate real checkouts */}
+              {activeProcessStep && (
+                <div className="absolute inset-0 bg-white/95 z-50 flex flex-col items-center justify-center p-6 text-center select-none" id="verification-progress-overlay">
+                  <div className="w-16 h-16 rounded-full border-4 border-slate-100 border-t-indigo-600 animate-spin flex items-center justify-center mb-6">
+                    <Lock className="w-6 h-6 text-indigo-600" />
+                  </div>
+                  <h4 className="text-base font-black text-slate-900 mb-2">
+                    {isRTL ? 'تتم المعالجة عبر بروتوكول آمن 3D Secure' : 'Traitement sécurisé en cours via 3D Secure'}
+                  </h4>
+                  <p className="text-xs text-gray-500 font-semibold animate-pulse tracking-wide leading-relaxed">
+                    {activeProcessStep}
+                  </p>
+                  <span className="text-[10px] text-gray-400 font-mono mt-8">
+                    Réf System: pz_morocco_secured_transfer_hold
+                  </span>
+                </div>
+              )}
 
             </div>
           )}

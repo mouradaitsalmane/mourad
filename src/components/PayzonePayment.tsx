@@ -16,6 +16,7 @@ import {
 import { LanguageKey, TRANSLATIONS } from '../data/rabatData';
 import { doc, updateDoc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import FintechLogo from './FintechLogo';
 
 interface PayzonePaymentProps {
   amount: number; // in MAD (Dirham)
@@ -233,17 +234,15 @@ export default function PayzonePayment({
         <div className="relative transform overflow-hidden rounded-3xl bg-white shadow-2xl transition-all sm:my-8 w-full max-w-md border border-slate-100 flex flex-col">
           
           {/* Header */}
-          <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-sky-500/5 to-indigo-500/5 flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-[#E11D48] to-[#1E3A8A] p-2 flex items-center justify-center text-white shrink-0">
-                <CreditCard className="w-5 h-5" />
-              </div>
+          <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-blue-500/5 to-amber-500/5 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <FintechLogo size="sm" showText={false} className="shrink-0" id="fintech-header-icon" />
               <div className="flex flex-col text-right">
-                <span className="text-[10px] font-black uppercase text-sky-600 tracking-wider">
-                  {isRTL ? 'بوابة الدفع الآمن المغربية' : 'Payzone Maroc Secure'}
+                <span className="text-[10px] font-black uppercase bg-gradient-to-r from-blue-600 to-amber-600 bg-clip-text text-transparent tracking-wider">
+                  {isRTL ? 'بوابة الدفع الآمن الممتازة' : 'CrediZone Escrow Secure'}
                 </span>
                 <h3 className="text-sm font-black text-gray-900 leading-none mt-1">
-                  Payzone Payment Portal
+                  CrediZone Gateway
                 </h3>
               </div>
             </div>
@@ -503,7 +502,7 @@ export default function PayzonePayment({
                 <div className="bg-slate-50 border border-gray-150-300 w-full rounded-2xl p-3.5 mt-2 text-xs font-semibold flex flex-col gap-1.5 text-right font-mono">
                   <div className="flex justify-between">
                     <span className="text-gray-400">{isRTL ? 'المستلم:' : 'Marchand:'}</span>
-                    <span className="text-slate-800 font-bold">RabatTasker Morocco</span>
+                    <span className="text-slate-800 font-bold">Tasker Morocco</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-400">{isRTL ? 'المرجع البنكي:' : 'Id Payzone:'}</span>

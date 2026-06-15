@@ -35,6 +35,7 @@ import HomePage from './components/HomePage';
 import UserDashboard from './components/UserDashboard';
 import WorkerDashboard from './components/WorkerDashboard';
 import AdminPanel from './components/AdminPanel';
+import HowItWorksPage from './components/HowItWorksPage';
 
 // Icon imports
 import { 
@@ -56,7 +57,7 @@ export default function App() {
   const isRTL = lang === 'ar';
 
   // Navigation View State
-  const [currentView, setCurrentView] = useState<'home' | 'explorer' | 'dashboard' | 'admin'>('home');
+  const [currentView, setCurrentView] = useState<'home' | 'explorer' | 'dashboard' | 'admin' | 'how-it-works'>('home');
   const [dashboardMode, setDashboardMode] = useState<'client' | 'worker'>('client');
 
   // Auth & Profile State
@@ -73,13 +74,14 @@ export default function App() {
   // Modals
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState<false | 'signin' | 'signup'>(false);
 
   // Filters State
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [selectedNeighborhood, setSelectedNeighborhood] = useState('all');
   const [showOnlyOpen, setShowOnlyOpen] = useState(true);
+  const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null);
 
   // 1. Auth Change Listener
   useEffect(() => {
@@ -172,7 +174,7 @@ export default function App() {
     })();
 
     // Status filter - Open only OR all
-    const matchesStatus = !showOnlyOpen || task.status === 'open';
+    const matchesStatus = !showOnlyOpen || task.status === 'open' || task.status === 'held';
 
     return matchesSearch && matchesCategory && matchesNeighborhood && matchesStatus;
   });
@@ -190,7 +192,7 @@ export default function App() {
         setLang={setLang}
         onPostClick={() => {
           if (!user) {
-            setShowAuthModal(true);
+            setShowAuthModal('signin');
           } else if (showProfileSetup) {
             setShowProfileSetup(true);
           } else {
@@ -198,7 +200,7 @@ export default function App() {
           }
         }}
         onOpenSettings={() => setShowSettingsModal(true)}
-        onLoginClick={() => setShowAuthModal(true)}
+        onLoginClick={(mode) => setShowAuthModal(mode || 'signin')}
         currentView={currentView}
         onViewChange={setCurrentView}
       />
@@ -212,7 +214,7 @@ export default function App() {
           userProfile={userProfile}
           onPostTask={() => {
             if (!user) {
-              setShowAuthModal(true);
+              setShowAuthModal('signin');
             } else if (showProfileSetup) {
               setShowProfileSetup(true);
             } else {
@@ -234,124 +236,59 @@ export default function App() {
             setCurrentView('explorer');
             window.scrollTo({ top: 0, behavior: 'smooth' });
           }}
-          onLoginClick={() => setShowAuthModal(true)}
+          onLoginClick={(mode) => setShowAuthModal(mode || 'signin')}
         />
       )}
 
       {currentView === 'explorer' && (
-        <>
-          {/* Hero Banner Area */}
-          <section className="relative overflow-hidden bg-white border-b border-gray-100 py-12 sm:py-16 animate-fade-in">
-            <div className="absolute inset-0 bg-gradient-to-tr from-sky-500/10 via-white to-indigo-500/5 opacity-70 pointer-events-none" />
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 flex flex-col md:flex-row items-center justify-between gap-8 flex-row-reverse">
-              
-              <div className={`flex flex-col max-w-2xl ${isRTL ? 'text-right' : 'text-left'}`}>
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-sky-50 text-sky-700 border border-sky-100 w-fit mb-4">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>{isRTL ? 'مرحباً بجمهور عاصمة الأنوار الرباط' : 'Bienvenue à la capitale de Rabat'}</span>
-                </div>
-                
-                <h1 className="text-3xl sm:text-4xl lg:text-5xl font-black text-gray-950 leading-tight">
-                  {isRTL ? (
-                    <>
-                      أنجز خدماتك المنزلية في <span className="text-sky-600 underline decoration-sky-300 decoration-wavy underline-offset-6">الرباط</span> بكل أمان
-                    </>
-                  ) : (
-                    <>
-                      Faites réaliser vos tâches à <span className="text-sky-600 underline">Rabat</span> en toute confiance
-                    </>
-                  )}
-                </h1>
-                
-                <p className="text-sm sm:text-base text-gray-500 mt-4 leading-relaxed font-medium">
-                  {t.tagline}
-                </p>
-
-                {/* Quick platform trust claims */}
-                <div className="flex flex-wrap items-center gap-4 mt-6 text-xs text-gray-600 font-semibold">
-                  <span className="flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                    <span>{isRTL ? 'توثيق فيربيز الآمن' : 'Sécurisé par Firebase'}</span>
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <CheckCircle className="w-4 h-4 text-emerald-600" />
-                    <span>{isRTL ? 'شيكات وأحياء حقيقية بالرباط' : 'Vrais quartiers de Rabat'}</span>
-                  </span>
-                </div>
-              </div>
-
-              {/* Quick task stats card */}
-              <div className="w-full md:w-80 bg-slate-900 text-white p-6 rounded-3xl shadow-xl flex flex-col gap-4 relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-24 h-24 bg-sky-500/20 rounded-full blur-2xl" />
-                
-                <div className="flex flex-col text-right col-reverse">
-                  <span className="text-xs text-sky-400 font-bold">{isRTL ? 'إجمالي طلبات العمل المتاحة' : 'Total des offres en cours'}</span>
-                  <span className="text-3xl font-black tracking-tight mt-1">{tasks.length} {isRTL ? 'مهمة في الرباط' : 'tâches'}</span>
-                </div>
-
-                <button
-                  onClick={() => {
-                    if (!user) {
-                      setShowAuthModal(true);
-                    } else {
-                      setShowCreateModal(true);
-                    }
-                  }}
-                  className="w-full bg-sky-500 hover:bg-sky-600 text-white font-bold py-2.5 rounded-xl text-xs transition-colors cursor-pointer text-center"
-                >
-                  {t.postTaskBtn}
-                </button>
-              </div>
-
+        <div className="animate-fade-in flex flex-col w-full">
+          {/* 1. Header Centered Title & Integrated Search Bar */}
+          <section className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 pt-8 pb-8 text-center" id="explorer-modern-search-header">
+            <h1 className="text-2xl sm:text-3.5xl font-black text-gray-950 tracking-tight mb-5">
+              {isRTL ? 'اعثر على المهام في الرباط' : 'Trouvez des tâches à Rabat'}
+            </h1>
+            
+            {/* Airtasker styling Search box */}
+            <div className="max-w-2.5xl mx-auto relative shadow-md rounded-2xl group border border-slate-200 focus-within:border-sky-500 focus-within:ring-4 focus-within:ring-sky-100 bg-white transition-all duration-300">
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder={t.searchPlaceholder}
+                className={`w-full text-xs font-bold bg-transparent pl-4 pr-4 py-4.5 focus:outline-none text-gray-900 ${
+                  isRTL ? 'text-right' : 'text-left'
+                }`}
+              />
+              <button 
+                className={`absolute top-2 bottom-2 bg-sky-600 hover:bg-sky-700 text-white font-black text-xs px-5 rounded-xl cursor-pointer transition-colors shadow-xs ${
+                  isRTL ? 'left-2' : 'right-2'
+                }`}
+                onClick={() => {}}
+              >
+                {isRTL ? 'بحث' : 'Rechercher'}
+              </button>
             </div>
           </section>
 
-          {/* Interactive Rabat Map Dashboard */}
-          <section className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 pt-8 animate-fade-in" id="rabat-map-dashboard-section">
-            <RabatMap
-              tasks={tasks}
-              selectedNeighborhood={selectedNeighborhood}
-              onSelectNeighborhood={setSelectedNeighborhood}
-              lang={lang}
-            />
-          </section>
-
-          {/* Main tasks explorer grid and filters */}
-          <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 grid grid-cols-1 lg:grid-cols-4 gap-8">
+          {/* 2. Structured modern 3-column Airtasker layout matching percentages */}
+          <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-16 w-full grid grid-cols-1 lg:grid-cols-[20%_45%_35%] gap-6 items-start" id="explorer-main-hub">
             
-            {/* Left Side: Filter Rail Panel */}
-            <section className="lg:col-span-1 flex flex-col gap-6">
+            {/* Column A: Filters (20%) */}
+            <section className="flex flex-col gap-5 lg:col-span-1 order-2 lg:order-none">
               <div className="bg-white border border-gray-100 rounded-3xl p-5 shadow-xs flex flex-col gap-5">
-                <h3 className="text-sm font-bold text-gray-900 border-b border-gray-50 pb-3">
-                  {isRTL ? 'خيارات التصفية والبحث' : 'Filtres de recherche'}
+                <h3 className="text-xs font-black uppercase text-gray-400 tracking-wider border-b border-gray-50 pb-3">
+                  {isRTL ? 'الفئة والموقع' : 'Filtres de recherche'}
                 </h3>
-
-                {/* A. Search Field */}
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-bold text-gray-700">
-                    {isRTL ? 'ابحث بكلمة دلالية' : 'Recherche par nom'}
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      placeholder={t.searchPlaceholder}
-                      className="w-full text-xs border border-gray-200 rounded-xl pl-3 pr-9 py-2.5 focus:outline-none focus:border-sky-500"
-                    />
-                    <Search className={`absolute w-4 h-4 text-gray-400 top-3 ${isRTL ? 'right-3' : 'left-3'}`} />
-                  </div>
-                </div>
 
                 {/* B. Category Filter */}
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-bold text-gray-700">
+                  <label className="text-[11px] font-black text-gray-600">
                     {t.filterCategory}
                   </label>
                   <select
                     value={selectedCategory}
                     onChange={(e) => setSelectedCategory(e.target.value)}
-                    className="w-full text-xs border border-gray-200 rounded-xl px-2 py-2.5 focus:outline-none focus:border-sky-500 bg-white"
+                    className="w-full text-xs border border-gray-200 rounded-xl px-2.5 py-3 focus:outline-none focus:border-sky-500 bg-slate-50/50 font-bold text-gray-700 cursor-pointer"
                   >
                     <option value="all">{t.allCategories}</option>
                     {SERVICE_CATEGORIES.map(category => (
@@ -364,13 +301,13 @@ export default function App() {
 
                 {/* C. Neighborhood Filter */}
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-bold text-gray-700">
+                  <label className="text-[11px] font-black text-gray-600">
                     {t.filterNeighborhood}
                   </label>
                   <select
                     value={selectedNeighborhood}
                     onChange={(e) => setSelectedNeighborhood(e.target.value)}
-                    className="w-full text-xs border border-gray-200 rounded-xl px-2 py-2.5 focus:outline-none focus:border-sky-500 bg-white"
+                    className="w-full text-xs border border-gray-200 rounded-xl px-2.5 py-3 focus:outline-none focus:border-sky-500 bg-slate-50/50 font-bold text-gray-700 cursor-pointer"
                   >
                     <option value="all">{t.allNeighborhoods}</option>
                     {RABAT_NEIGHBORHOODS.map(district => (
@@ -383,116 +320,170 @@ export default function App() {
 
                 {/* D. Status Toggle */}
                 <div className="flex items-center justify-between border-t border-gray-50 pt-4 mt-2">
-                  <span className="text-xs font-bold text-gray-700">
-                    {isRTL ? 'إظهار المهمات المفتوحة فقط' : 'Afficher seulement les tâches ouvertes'}
+                  <span className="text-[11px] font-black text-gray-600">
+                    {isRTL ? 'إظهار المفتوحة فقط' : 'Tâches ouvertes'}
                   </span>
                   <button
                     onClick={() => setShowOnlyOpen(!showOnlyOpen)}
-                    className={`w-10 h-6 rounded-full transition-colors relative cursor-pointer ${
-                      showOnlyOpen ? 'bg-sky-600' : 'bg-gray-200'
+                    className={`w-9 h-5.5 rounded-full transition-colors relative cursor-pointer ${
+                      showOnlyOpen ? 'bg-sky-600' : 'bg-gray-250'
                     }`}
                   >
-                    <span className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${
+                    <span className={`absolute top-0.5 w-4.5 h-4.5 rounded-full bg-white transition-all ${
                       isRTL 
-                        ? (showOnlyOpen ? 'left-1' : 'left-5') 
-                        : (showOnlyOpen ? 'left-5' : 'left-1')
+                        ? (showOnlyOpen ? 'right-0.5' : 'right-4') 
+                        : (showOnlyOpen ? 'left-4' : 'left-0.5')
                     }`} />
                   </button>
                 </div>
 
               </div>
 
-              {/* Localized Safety Info cards */}
-              <div className="bg-sky-50/50 border border-sky-100 rounded-3xl p-5 flex flex-col gap-3">
+              {/* Solid safety trust notice details */}
+              <div className="bg-sky-50/50 border border-sky-100 rounded-3xl p-4.5 flex flex-col gap-3">
                 <div className="flex items-start gap-2.5">
-                  <Info className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
+                  <span className="text-sky-600 text-sm mt-0.5">ℹ️</span>
                   <div className="flex flex-col text-right">
-                    <span className="text-xs font-bold text-sky-950">نظام الرباط الموثوق للخدمات</span>
-                    <p className="text-[10px] text-sky-700 mt-1.5 leading-relaxed font-semibold">
-                      جميع الخدمات مخصصة لسكان العاصمة الرباط. يتم تنسيق استلام وتسليم الأموال بين الزبون ومقدم الخدمة باتفاق متبادل.
+                    <span className="text-xs font-black text-sky-950">{isRTL ? 'مركز حماية الزبائن' : 'Sécurité Tasker'}</span>
+                    <p className="text-[10px] text-sky-700 mt-1 leading-relaxed font-bold">
+                      {isRTL 
+                        ? 'تتم جميع المعاملات بالدرهم المغربي مع حماية الضمان الحصري.' 
+                        : 'Paiements protégés par le compte séquestre de confiance.'}
                     </p>
                   </div>
                 </div>
               </div>
             </section>
 
-            {/* Right Side: Bento Tasks Directory Grid */}
-            <section className="lg:col-span-3">
-              <div className="flex flex-col gap-6">
-                
-                {/* Folder Header Summary */}
-                <div className="flex items-center justify-between">
-                  <h2 className="text-lg font-black text-gray-900">
-                    {t.homeTitle} ({filteredTasks.length})
-                  </h2>
-                  <span className="text-xs text-gray-400 font-medium hidden sm:inline">
-                    {isRTL ? 'قم بالنقر على المهمة لعرض التفاصيل الكاملة والتقديم' : 'Cliquez sur la carte pour soumettre un tarif.'}
-                  </span>
-                </div>
-
-                {loadingTasks ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 animate-pulse">
-                    {[1, 2, 3, 4].map(idx => (
-                      <div key={idx} className="bg-white border border-gray-100 h-44 rounded-2xl p-5" />
-                    ))}
-                  </div>
-                ) : filteredTasks.length === 0 ? (
-                  <div className="bg-white border border-gray-100 rounded-3xl py-12 px-6 text-center flex flex-col items-center justify-center gap-3">
-                    <div className="w-12 h-12 rounded-full bg-gray-50 flex items-center justify-center text-gray-400 text-lg font-semibold">
-                      !
-                    </div>
-                    <h4 className="text-sm font-bold text-gray-800">{t.emptyTasks}</h4>
-                    <p className="text-xs text-gray-400 max-w-sm mt-1">
-                      {isRTL ? 'يمكنك تغيير فلاتر التصفية أو الفئات لاستكشاف عروض أخرى مضافة في أحياء العاصمة.' : 'Changez de critères.'}
-                    </p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-5" id="tasks-bento-grid">
-                    {filteredTasks.map((task) => (
-                      <TaskCard
-                        key={task.id}
-                        task={task}
-                        lang={lang}
-                        onClick={() => setSelectedTask(task)}
-                      />
-                    ))}
-                  </div>
+            {/* Column B: Tasks Feed (45%) */}
+            <section className="flex flex-col gap-5 lg:col-span-1 order-3 lg:order-none">
+              {/* Folder Header Summary */}
+              <div className="flex items-center justify-between px-1">
+                <h2 className="text-base font-black text-gray-900">
+                  {t.homeTitle} ({filteredTasks.length})
+                </h2>
+                {selectedNeighborhood !== 'all' && (
+                  <button 
+                    onClick={() => setSelectedNeighborhood('all')} 
+                    className="text-[10px] text-sky-600 font-extrabold hover:underline"
+                  >
+                    {isRTL ? 'عرض الكل ↺' : 'Tout afficher'}
+                  </button>
                 )}
+              </div>
 
+              {loadingTasks ? (
+                <div className="flex flex-col gap-4 animate-pulse">
+                  {[1, 2, 3].map(idx => (
+                    <div key={idx} className="bg-white border border-gray-100 h-44 rounded-2xl p-5" />
+                  ))}
+                </div>
+              ) : filteredTasks.length === 0 ? (
+                <div className="bg-white border border-gray-150 rounded-3xl py-14 px-6 text-center flex flex-col items-center justify-center gap-3 shadow-2xs">
+                  <div className="w-12 h-12 rounded-full bg-slate-50 flex items-center justify-center text-gray-400 text-lg font-black">
+                    🍃
+                  </div>
+                  <h4 className="text-sm font-black text-slate-800">{t.emptyTasks}</h4>
+                  <p className="text-xs text-slate-400 font-semibold max-w-sm">
+                    {isRTL ? 'يرجى تغيير خيارات البحث أو تصفية الفئة للأحياء المجاورة.' : 'Essayez d’autres critères.'}
+                  </p>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-4.5" id="tasks-feed-container">
+                  {filteredTasks.map((task) => (
+                    <TaskCard
+                      key={task.id}
+                      task={task}
+                      lang={lang}
+                      onClick={() => setSelectedTask(task)}
+                      onMouseEnter={() => setHoveredTaskId(task.id)}
+                      onMouseLeave={() => setHoveredTaskId(null)}
+                      isHighlighted={hoveredTaskId === task.id}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
+
+            {/* Column C: Sticky Map Column (35%) */}
+            <section 
+              className="block lg:sticky bg-white border border-gray-150 shadow-sm overflow-hidden flex flex-col order-1 lg:order-none h-[380px] lg:h-[calc(100vh-120px)] lg:top-[90px]"
+              style={{
+                borderRadius: '24px'
+              }}
+              id="sticky-sidebar-map-parent"
+            >
+              {/* Header inside the Map sidebar */}
+              <div className="bg-slate-900 border-b border-slate-800 text-white px-5 py-4 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-1.5 font-black text-xs">
+                  <span className="text-sm shrink-0">📍</span>
+                  <span>{isRTL ? 'الرباط' : 'Rabat'}</span>
+                </div>
+                <div className="bg-white/10 px-3 py-1 rounded-full text-[10.5px] font-black border border-white/10 text-amber-400">
+                  {filteredTasks.length} {isRTL ? 'مهمة متاحة' : 'tâches disponibles'}
+                </div>
+              </div>
+
+              {/* The Map view itself filling remaining height */}
+              <div className="flex-1 w-full relative bg-slate-50 overflow-hidden">
+                <div className="absolute inset-0 [&>div]:border-none [&>div]:shadow-none [&>div]:p-0 [&_svg]:max-w-none">
+                  <RabatMap
+                    tasks={tasks}
+                    selectedNeighborhood={selectedNeighborhood}
+                    onSelectNeighborhood={setSelectedNeighborhood}
+                    lang={lang}
+                    onSelectTask={(task) => setSelectedTask(task)}
+                    sidebarMode={true}
+                    hoveredTaskId={hoveredTaskId}
+                  />
+                </div>
               </div>
             </section>
 
           </main>
-        </>
+        </div>
+      )}
+
+      {currentView === 'how-it-works' && (
+        <HowItWorksPage
+          lang={lang}
+          onPostTask={() => {
+            if (!user) {
+              setShowAuthModal('signin');
+            } else if (showProfileSetup) {
+              setShowProfileSetup(true);
+            } else {
+              setShowCreateModal(true);
+            }
+          }}
+          onExploreClick={() => {
+            setCurrentView('explorer');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+          onLoginClick={(mode) => setShowAuthModal(mode || 'signin')}
+        />
       )}
 
       {currentView === 'dashboard' && user && (
-        user.uid === 'sDCii92rV7fKTvvDgWTQCLKxwJr1' ? (
-          <AdminPanel
+        dashboardMode === 'worker' ? (
+          <WorkerDashboard
+            user={user}
+            userProfile={userProfile}
             lang={lang}
-            tasks={tasks}
+            onSelectTask={(task) => setSelectedTask(task)}
+            onOpenSettings={() => setShowSettingsModal(true)}
+            onToggleToClient={() => setDashboardMode('client')}
           />
         ) : (
-          dashboardMode === 'worker' ? (
-            <WorkerDashboard
-              user={user}
-              userProfile={userProfile}
-              lang={lang}
-              onSelectTask={(task) => setSelectedTask(task)}
-              onOpenSettings={() => setShowSettingsModal(true)}
-              onToggleToClient={() => setDashboardMode('client')}
-            />
-          ) : (
-            <UserDashboard
-              user={user}
-              userProfile={userProfile}
-              lang={lang}
-              onSelectTask={(task) => setSelectedTask(task)}
-              onOpenSettings={() => setShowSettingsModal(true)}
-              onOpenCreateTask={() => setShowCreateModal(true)}
-              onToggleToWorker={() => setDashboardMode('worker')}
-            />
-          )
+          <UserDashboard
+            user={user}
+            userProfile={userProfile}
+            lang={lang}
+            onSelectTask={(task) => setSelectedTask(task)}
+            onOpenSettings={() => setShowSettingsModal(true)}
+            onOpenCreateTask={() => setShowCreateModal(true)}
+            onToggleToWorker={() => setDashboardMode('worker')}
+          />
         )
       )}
 
@@ -511,6 +502,7 @@ export default function App() {
         setSelectedCategory={setSelectedCategory}
         selectedNeighborhood={selectedNeighborhood}
         setSelectedNeighborhood={setSelectedNeighborhood}
+        onViewChange={setCurrentView}
       />
 
       {/* 4. Overlay Modals */}
@@ -571,6 +563,7 @@ export default function App() {
       {showAuthModal && (
         <AuthModal
           lang={lang}
+          initialMode={showAuthModal}
           onClose={() => setShowAuthModal(false)}
           onSuccess={() => {
             setShowAuthModal(false);

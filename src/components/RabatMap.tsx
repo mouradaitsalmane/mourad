@@ -54,13 +54,19 @@ interface RabatMapProps {
   selectedNeighborhood: string;
   onSelectNeighborhood: (id: string) => void;
   lang: LanguageKey;
+  onSelectTask?: (task: Task) => void;
+  hoveredTaskId?: string | null;
+  sidebarMode?: boolean;
 }
 
 export default function RabatMap({ 
   tasks, 
   selectedNeighborhood, 
   onSelectNeighborhood, 
-  lang 
+  lang,
+  onSelectTask,
+  hoveredTaskId = null,
+  sidebarMode = false
 }: RabatMapProps) {
   const isRTL = lang === 'ar';
   
@@ -72,7 +78,7 @@ export default function RabatMap({
     return tasks.filter(task => {
       // Check for matching AR or FR name, or status = open
       const matchesName = task.location === neighborhoodObj.ar || task.location === neighborhoodObj.fr;
-      return matchesName && task.status === 'open';
+      return matchesName && (task.status === 'open' || task.status === 'held');
     }).length;
   };
 
@@ -203,8 +209,59 @@ export default function RabatMap({
       dotColor: 'bg-cyan-500',
       descriptionAr: 'التوسع الفاخر الهادئ جنوب الرباط وصالات الفروسية',
       descriptionFr: 'Extension calme, clubs équestres et verdures'
+    },
+    {
+      id: 'temara',
+      svgPath: 'M 30 220 L 135 265 L 175 355 L 30 355 Z',
+      labelX: 90,
+      labelY: 300,
+      icon: Home,
+      colorClass: 'fill-indigo-500/10 stroke-indigo-500/40 hover:fill-indigo-500/20',
+      activeColorClass: 'fill-indigo-600/30 stroke-indigo-500 bg-indigo-50 text-indigo-950',
+      dotColor: 'bg-indigo-500',
+      descriptionAr: 'مدينة تمارة الساحلي والنشاط التجاري والشبابي',
+      descriptionFr: 'Ville de Témara, plages, commerces et extension'
+    },
+    {
+      id: 'sale',
+      svgPath: 'M 350 30 L 500 0 L 540 60 L 400 115 Z',
+      labelX: 450,
+      labelY: 45,
+      icon: Ship,
+      colorClass: 'fill-amber-500/10 stroke-amber-500/40 hover:fill-amber-500/20',
+      activeColorClass: 'fill-amber-600/30 stroke-amber-500 bg-amber-50 text-amber-950',
+      dotColor: 'bg-amber-500',
+      descriptionAr: 'سلا التاريخية ومارينا أبي رقراق ومطار الرباط سلا',
+      descriptionFr: 'Salé historique, aéroport, marina et traditions'
     }
   ];
+
+  // Calculate active tasks coordinates with appropriate stagger offsets
+  const neighborhoodOffsetCounts: Record<string, number> = {};
+  const activeTasksWithCoords = tasks.filter(task => {
+    return task.status === 'open' || task.status === 'held';
+  }).map((task) => {
+    const district = RABAT_NEIGHBORHOODS.find(n => task.location === n.ar || task.location === n.fr);
+    const sectorId = district ? district.id : 'all';
+    const sector = MAP_SECTORS.find(s => s.id === sectorId);
+    
+    if (!neighborhoodOffsetCounts[sectorId]) {
+      neighborhoodOffsetCounts[sectorId] = 0;
+    }
+    const index = neighborhoodOffsetCounts[sectorId];
+    neighborhoodOffsetCounts[sectorId] += 1;
+
+    // Beautifully stagger overlapping price tags like Airbnb
+    const offsetX = index === 0 ? 0 : (index % 2 === 0 ? -20 : 20) * Math.ceil(index / 2);
+    const offsetY = index === 0 ? 0 : (index % 2 === 0 ? -12 : 12) * Math.ceil(index / 2);
+
+    return {
+      ...task,
+      labelX: sector ? sector.labelX + offsetX : 250,
+      labelY: sector ? sector.labelY + offsetY : 175,
+      sectorId: sectorId
+    };
+  });
 
   // Quick reset toggle
   const handleMapClick = (sectorId: string) => {
@@ -217,6 +274,197 @@ export default function RabatMap({
 
   const selectedSectorObj = MAP_SECTORS.find(s => s.id === selectedNeighborhood);
   const selectedDistrictObj = RABAT_NEIGHBORHOODS.find(n => n.id === selectedNeighborhood);
+
+  if (sidebarMode) {
+    return (
+      <div className="w-full h-full flex flex-col relative overflow-hidden bg-[#f8fafc]" id="rabat-sidebar-interactive-map">
+        {/* Subtle decorative absolute overlays */}
+        <div className="absolute inset-0 bg-radial-gradient/5 pointer-events-none" />
+        
+        {/* Simple Neighborhood Indicator */}
+        <div className="absolute top-3 left-3 bg-white/90 backdrop-blur-md px-3 py-1.5 rounded-xl border border-slate-200 shadow-xs text-[10px] font-black pointer-events-none flex items-center gap-1.5 select-none z-10">
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span className="text-gray-800 uppercase tracking-widest font-sans">
+            {selectedNeighborhood === 'all' 
+              ? (isRTL ? 'تصفح بالخريطة' : 'Explorer par carte')
+              : (isRTL 
+                  ? `${selectedDistrictObj?.ar}` 
+                  : `${selectedDistrictObj?.fr}`)
+            }
+          </span>
+        </div>
+
+        {/* Clear selection floating badge */}
+        {selectedNeighborhood !== 'all' && (
+          <button
+            onClick={() => onSelectNeighborhood('all')}
+            className="absolute top-3 right-3 bg-sky-600 hover:bg-sky-750 text-white font-black text-[10px] px-3 py-1.5 rounded-xl shadow-md border border-sky-500 transition-all cursor-pointer z-10"
+          >
+            {isRTL ? 'الكل ↺' : 'Tout ↺'}
+          </button>
+        )}
+
+        {/* Compass & Ocean overlays inside sidebar mode */}
+        <div className="absolute bottom-4 left-4 text-sky-700/25 text-[9px] font-black uppercase tracking-widest pointer-events-none select-none">
+          {isRTL ? 'المحيط الأطلسي' : 'Océan Atlantique'}
+        </div>
+
+        {/* Center SVG container to maximize size inside sidebar */}
+        <div className="flex-1 w-full flex items-center justify-center p-3">
+          <svg 
+            xmlns="http://www.w3.org/2000/svg" 
+            viewBox="0 0 540 380" 
+            className="w-[105%] h-auto max-h-full drop-shadow-sm select-none"
+          >
+            {/* Outline Atlantic Ocean Coast Grid lines */}
+            <path d="M 0,20 Q 80,40 100,100" fill="none" stroke="#e2e8f0" strokeWidth="1.5" strokeDasharray="4 4" />
+            <path d="M 0,55 Q 110,80 120,180" fill="none" stroke="#e2e8f0" strokeWidth="1.5" strokeDasharray="4 4" />
+            
+            {/* Bouregreg River blue path decoration */}
+            <path 
+              d="M 330,30 Q 380,20 460,50 T 540,110" 
+              fill="none" 
+              stroke="#bae6fd" 
+              strokeWidth="10" 
+              className="opacity-70"
+            />
+            <path 
+              d="M 330,30 Q 380,20 460,50 T 540,110" 
+              fill="none" 
+              stroke="#7dd3fc" 
+              strokeWidth="3" 
+              className="opacity-90"
+            />
+
+            {/* Neighborhood Polygons */}
+            <g id="neighborhood-polygons-group-sidebar">
+              {MAP_SECTORS.map((sector) => {
+                const isActive = selectedNeighborhood === sector.id;
+                const taskCount = getTaskCountByNeighborhood(sector.id);
+                const translationInfo = RABAT_NEIGHBORHOODS.find(n => n.id === sector.id);
+                const arabicName = translationInfo?.ar || '';
+                const frenchName = translationInfo?.fr || '';
+
+                return (
+                  <motion.path
+                    key={sector.id}
+                    d={sector.svgPath}
+                    onClick={() => handleMapClick(sector.id)}
+                    whileHover={{ scale: 1.015, fillOpacity: 0.28 }}
+                    whileTap={{ scale: 0.985 }}
+                    animate={{ 
+                      strokeWidth: isActive ? 2.5 : 1.5
+                    }}
+                    transition={{ type: "spring", stiffness: 350, damping: 18 }}
+                    style={{ transformOrigin: `${sector.labelX}px ${sector.labelY}px` }}
+                    className={`transition-colors duration-300 cursor-pointer ${
+                      isActive 
+                        ? 'fill-sky-500/25 stroke-sky-500 drop-shadow-md' 
+                        : sector.colorClass
+                    }`}
+                  >
+                    <title>{isRTL ? `${arabicName} (${taskCount} مهمة مفتوحة)` : `${frenchName} (${taskCount} tâches)`}</title>
+                  </motion.path>
+                );
+              })}
+            </g>
+
+            {/* 1. Sector Target Dots & Names */}
+            {MAP_SECTORS.map((sector) => {
+              const isActive = selectedNeighborhood === sector.id;
+              const sectorTasks = activeTasksWithCoords.filter(t => t.sectorId === sector.id);
+              const hasActiveTasks = sectorTasks.length > 0;
+              const translationInfo = RABAT_NEIGHBORHOODS.find(n => n.id === sector.id);
+              const displayName = translationInfo ? (isRTL ? translationInfo.ar : translationInfo.fr) : '';
+
+              return (
+                <g 
+                  key={`label-sidebar-${sector.id}`} 
+                  onClick={() => handleMapClick(sector.id)}
+                  className="cursor-pointer font-sans"
+                >
+                  {!hasActiveTasks && (
+                    <circle 
+                      cx={sector.labelX} 
+                      cy={sector.labelY} 
+                      r={ isActive ? 6 : 4 } 
+                      className={`transition-all duration-300 ${
+                        isActive 
+                          ? 'fill-amber-500 stroke-amber-200 stroke-2' 
+                          : 'fill-slate-400/80 stroke-white stroke-1 hover:fill-sky-500'
+                      }`}
+                    />
+                  )}
+
+                  {/* Neighborhood Text tag */}
+                  <text
+                    x={sector.labelX}
+                    y={hasActiveTasks ? sector.labelY - 18 : sector.labelY + 14}
+                    textAnchor="middle"
+                    className={`font-black text-[9px] tracking-tight pointer-events-none select-none transition-colors ${
+                      isActive ? 'fill-sky-800 font-extrabold text-[10px]' : 'fill-gray-500 font-bold'
+                    }`}
+                  >
+                    {displayName}
+                  </text>
+                </g>
+              );
+            })}
+
+            {/* 2. Airbnb-Style Premium Interactive Price Chips */}
+            {activeTasksWithCoords.map((task) => {
+              const isActive = selectedNeighborhood === task.sectorId;
+              const isHovered = hoveredTaskId === task.id;
+              const priceText = isRTL ? `${task.budget} درهم` : `${task.budget} DH`;
+              
+              return (
+                <g 
+                  key={`pin-sidebar-${task.id}`} 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelectNeighborhood(task.sectorId);
+                    if (onSelectTask) {
+                      onSelectTask(task);
+                    }
+                    setTimeout(() => {
+                      const cardElement = document.getElementById(`task-card-${task.id}`);
+                      if (cardElement) {
+                        cardElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      }
+                    }, 80);
+                  }}
+                  className="cursor-pointer group/pin"
+                >
+                  <foreignObject
+                    x={task.labelX - 35}
+                    y={task.labelY - 14}
+                    width={70}
+                    height={28}
+                    className="overflow-visible"
+                  >
+                    <div className="flex items-center justify-center w-full h-full">
+                      <div 
+                        className={`px-2 py-0.5 rounded-lg text-[9.5px] font-black shadow-md border text-center transition-all duration-300 transform whitespace-nowrap select-none ${
+                          isHovered 
+                            ? 'bg-rose-600 text-white border-rose-500 font-black scale-120 shadow-xl ring-4 ring-rose-200 animate-bounce'
+                            : isActive 
+                              ? 'bg-amber-400 text-slate-950 border-amber-300 font-extrabold scale-110 shadow-lg' 
+                              : 'bg-white text-gray-900 border-gray-200/80 hover:bg-sky-600 hover:text-white hover:border-sky-500 hover:scale-110'
+                        }`}
+                        title={task.title}
+                      >
+                        {priceText}
+                      </div>
+                    </div>
+                  </foreignObject>
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-white border border-gray-100 rounded-3xl p-5 md:p-6 shadow-sm flex flex-col gap-5" id="rabat-interactive-map-card">
@@ -328,91 +576,96 @@ export default function RabatMap({
               })}
             </g>
 
-            {/* Labels and Icons Overlaid on Centers */}
+            {/* 1. Sector Target Dots & Names */}
             {MAP_SECTORS.map((sector) => {
               const isActive = selectedNeighborhood === sector.id;
-              const taskCount = getTaskCountByNeighborhood(sector.id);
+              const sectorTasks = activeTasksWithCoords.filter(t => t.sectorId === sector.id);
+              const hasActiveTasks = sectorTasks.length > 0;
               const translationInfo = RABAT_NEIGHBORHOODS.find(n => n.id === sector.id);
               const displayName = translationInfo ? (isRTL ? translationInfo.ar : translationInfo.fr) : '';
-              const IconComp = sector.icon;
 
               return (
-                <motion.g 
+                <g 
                   key={`label-${sector.id}`} 
-                  className="pointer-events-none"
-                  initial={false}
-                  animate={isActive ? { scale: 1.25, y: -3 } : { scale: 1, y: 0 }}
-                  transition={{ type: "spring", stiffness: 400, damping: 18 }}
-                  style={{ transformOrigin: `${sector.labelX}px ${sector.labelY}px` }}
+                  onClick={() => handleMapClick(sector.id)}
+                  className="cursor-pointer font-sans"
                 >
-                  {/* Radar ripple pulse under active item */}
-                  {isActive && (
-                    <motion.circle
-                      cx={sector.labelX}
-                      cy={sector.labelY}
-                      r={15}
-                      className="fill-none stroke-amber-400 stroke-2"
-                      initial={{ scale: 0.8, opacity: 1 }}
-                      animate={{ scale: 2.2, opacity: 0 }}
-                      transition={{ 
-                        repeat: Infinity, 
-                        duration: 1.6, 
-                        ease: "easeOut" 
-                      }}
-                      style={{ transformOrigin: `${sector.labelX}px ${sector.labelY}px` }}
+                  {/* Subtle target dot only when no active tasks (otherwise Airbnb card represents it) */}
+                  {!hasActiveTasks && (
+                    <circle 
+                      cx={sector.labelX} 
+                      cy={sector.labelY} 
+                      r={ isActive ? 6 : 4 } 
+                      className={`transition-all duration-300 ${
+                        isActive 
+                          ? 'fill-amber-500 stroke-amber-200 stroke-2' 
+                          : 'fill-slate-400/80 stroke-white stroke-1 hover:fill-sky-500'
+                      }`}
                     />
                   )}
-
-                  {/* Subtle marker background circle */}
-                  <circle 
-                    cx={sector.labelX} 
-                    cy={sector.labelY} 
-                    r={15} 
-                    className={`transition-all duration-300 filter drop-shadow-md ${
-                      isActive ? 'fill-amber-500 stroke-amber-200 stroke-2' : 'fill-white/90 stroke-gray-200'
-                    }`}
-                  />
-                  
-                  {/* Embedded Tiny Icon */}
-                  <foreignObject 
-                    x={sector.labelX - 8} 
-                    y={sector.labelY - 8} 
-                    width={16} 
-                    height={16}
-                  >
-                    <div className="flex items-center justify-center w-full h-full">
-                      <IconComp className={`w-4 h-4 transition-all ${isActive ? 'text-white scale-120 stroke-[2.5]' : 'text-gray-700'}`} />
-                    </div>
-                  </foreignObject>
 
                   {/* Neighborhood Text tag */}
                   <text
                     x={sector.labelX}
-                    y={sector.labelY + 24}
+                    y={hasActiveTasks ? sector.labelY - 18 : sector.labelY + 14}
                     textAnchor="middle"
-                    className={`font-black text-[9px] tracking-tight pointer-events-none transition-colors ${
-                      isActive ? 'fill-sky-800 font-black text-[10px]' : 'fill-gray-900 font-bold'
+                    className={`font-black text-[9px] tracking-tight pointer-events-none select-none transition-colors ${
+                      isActive ? 'fill-sky-800 font-extrabold text-[10px]' : 'fill-gray-500 font-bold'
                     }`}
                   >
                     {displayName}
                   </text>
+                </g>
+              );
+            })}
 
-                  {/* Counter Badge if tasks count > 0 */}
-                  {taskCount > 0 && (
-                    <g transform={`translate(${sector.labelX + 8}, ${sector.labelY - 14})`}>
-                      <circle r={7.5} fill="#f43f5e" />
-                      <text 
-                        y={2.5} 
-                        textAnchor="middle" 
-                        fill="white" 
-                        fontSize="7.5" 
-                        fontWeight="black"
+            {/* 2. Airbnb-Style Premium Interactive Price Chips */}
+            {activeTasksWithCoords.map((task) => {
+              const isActive = selectedNeighborhood === task.sectorId;
+              const isHovered = hoveredTaskId === task.id;
+              const priceText = isRTL ? `${task.budget} درهم` : `${task.budget} DH`;
+              
+              return (
+                <g 
+                  key={`pin-${task.id}`} 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelectNeighborhood(task.sectorId);
+                    if (onSelectTask) {
+                      onSelectTask(task);
+                    }
+                    setTimeout(() => {
+                      const cardElement = document.getElementById(`task-card-${task.id}`);
+                      if (cardElement) {
+                        cardElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      }
+                    }, 80);
+                  }}
+                  className="cursor-pointer group/pin"
+                >
+                  <foreignObject
+                    x={task.labelX - 35}
+                    y={task.labelY - 14}
+                    width={70}
+                    height={28}
+                    className="overflow-visible"
+                  >
+                    <div className="flex items-center justify-center w-full h-full">
+                      <div 
+                        className={`px-2.5 py-1 rounded-xl text-[10px] font-black shadow-md border text-center transition-all duration-300 transform whitespace-nowrap select-none ${
+                          isHovered 
+                            ? 'bg-rose-600 text-white border-rose-500 font-black scale-120 shadow-xl ring-4 ring-rose-200 animate-bounce'
+                            : isActive 
+                              ? 'bg-amber-500 text-slate-950 border-amber-400 font-extrabold scale-110 shadow-lg' 
+                              : 'bg-white text-gray-900 border-gray-200/80 group-hover/pin:scale-115 group-hover/pin:bg-sky-600 group-hover/pin:text-white group-hover/pin:border-sky-500'
+                        }`}
+                        title={task.title}
                       >
-                        {taskCount}
-                      </text>
-                    </g>
-                  )}
-                </motion.g>
+                        {priceText}
+                      </div>
+                    </div>
+                  </foreignObject>
+                </g>
               );
             })}
           </svg>
@@ -451,7 +704,7 @@ export default function RabatMap({
                     <div className="flex items-center justify-between text-[11px] bg-white px-3 py-2 rounded-xl border border-gray-100">
                       <span className="text-gray-500 font-semibold">{isRTL ? 'مهمات مفتوحة كلياً' : 'Tâches totales ouvertes'}</span>
                       <span className="font-bold text-sky-700 bg-sky-50 px-2 py-0.5 rounded-lg border border-sky-100">
-                        {tasks.filter(t => t.status === 'open').length}
+                        {tasks.filter(t => t.status === 'open' || t.status === 'held').length}
                       </span>
                     </div>
 

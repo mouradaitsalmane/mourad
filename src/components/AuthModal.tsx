@@ -36,15 +36,16 @@ interface AuthModalProps {
   onClose: () => void;
   lang: LanguageKey;
   onSuccess: () => void;
+  initialMode?: 'signin' | 'signup' | 'forgot';
 }
 
 type AuthMode = 'signin' | 'signup' | 'forgot';
 
-export default function AuthModal({ onClose, lang, onSuccess }: AuthModalProps) {
+export default function AuthModal({ onClose, lang, onSuccess, initialMode }: AuthModalProps) {
   const t = TRANSLATIONS[lang];
   const isRTL = lang === 'ar';
 
-  const [mode, setMode] = useState<AuthMode>('signin');
+  const [mode, setMode] = useState<AuthMode>(initialMode || 'signin');
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -211,7 +212,7 @@ export default function AuthModal({ onClose, lang, onSuccess }: AuthModalProps) 
         const publicProfile: UserProfile = {
           uid: freshUser.uid,
           displayName: fullName.trim(),
-          bio: isRTL ? 'مستخدم جديد في مجتمع مهمات الرباط.' : 'Nouveau membre sur RabatTasker.',
+          bio: isRTL ? 'مستخدم جديد في مجتمع Tasker.' : 'Nouveau membre sur Tasker.',
           rating: 0,
           reviewsCount: 0,
           isTasker: true, // Default to tasker, they can edit anytime in settings
@@ -285,7 +286,7 @@ export default function AuthModal({ onClose, lang, onSuccess }: AuthModalProps) 
               <Logo size="sm" showText={false} />
               <div className="flex flex-col text-right">
                 <span className="text-xs font-bold text-sky-600">
-                  {isRTL ? 'مهمات الرباط الآمنة' : 'RabatTasker Sécurisé'}
+                  {isRTL ? 'Tasker الآمن' : 'Tasker Sécurisé'}
                 </span>
                 <h3 className="text-sm font-black text-slate-900 leading-tight">
                   {mode === 'signin' && (isRTL ? 'تسجيل الدخول إلى حسابك' : 'Se connecter')}
@@ -484,15 +485,15 @@ export default function AuthModal({ onClose, lang, onSuccess }: AuthModalProps) 
                   />
                   <label htmlFor="terms-signup-chk" className="text-[11px] text-gray-500 leading-relaxed font-semibold cursor-pointer">
                     {isRTL 
-                      ? 'أوافق وألتزم بشروط الاستخدام وسياسة الخصوصية الخاصة بمهمات الرباط، وأتعهد بالتعامل الخلوق والنافع مع سكان المدينة.' 
-                      : 'J’accepte les conditions d’utilisation de RabatTasker.'}
+                      ? 'أوافق وألتزم بشروط الاستخدام وسياسة الخصوصية الخاصة بمنصة Tasker، وأتعهد بالتعامل الخلوق والنافع مع سكان المدينة.' 
+                      : 'J’accepte les conditions d’utilisation de Tasker.'}
                   </label>
                 </div>
 
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3.5 px-4 rounded-xl text-xs transition-colors shadow-md hover:shadow-lg mt-2 cursor-pointer active:scale-98 disabled:opacity-50"
+                  className="w-full bg-sky-500 hover:bg-sky-600 text-white font-bold py-3.5 px-4 rounded-xl text-xs transition-colors shadow-md hover:shadow-lg mt-2 cursor-pointer active:scale-98 disabled:opacity-50"
                 >
                   {loading ? (isRTL ? 'جاري إنشاء الحساب...' : 'Création en cours...') : (isRTL ? 'إنشاء حساب جديد والمتابعة' : 'Créer un compte')}
                 </button>
