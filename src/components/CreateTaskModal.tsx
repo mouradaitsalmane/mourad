@@ -1,7 +1,6 @@
 import React, { useState, useRef } from 'react';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { SERVICE_CATEGORIES, RABAT_NEIGHBORHOODS, TRANSLATIONS, LanguageKey } from '../data/rabatData';
+import { createTaskService } from '../services/taskService';
 import { 
   X, 
   Sparkles, 
@@ -35,6 +34,9 @@ interface CreateTaskModalProps {
   lang: LanguageKey;
   onClose: () => void;
   onSuccess: () => void;
+  initialCategory?: string;
+  initialTitle?: string;
+  initialBudget?: number;
 }
 
 export default function CreateTaskModal({
@@ -42,7 +44,10 @@ export default function CreateTaskModal({
   userProfile,
   lang,
   onClose,
-  onSuccess
+  onSuccess,
+  initialCategory,
+  initialTitle,
+  initialBudget
 }: CreateTaskModalProps) {
   const t = TRANSLATIONS[lang];
   const isRTL = lang === 'ar';
@@ -51,10 +56,10 @@ export default function CreateTaskModal({
   const [step, setStep] = useState<'form' | 'preview' | 'verification'>('form');
 
   // Form Field States
-  const [title, setTitle] = useState('');
+  const [title, setTitle] = useState(initialTitle || '');
   const [description, setDescription] = useState('');
-  const [budget, setBudget] = useState<number>(200); // Default to 200 DH as requested
-  const [category, setCategory] = useState('cleaning');
+  const [budget, setBudget] = useState<number>(initialBudget || 200); // Default to 200 DH or initial budget
+  const [category, setCategory] = useState(initialCategory || 'cleaning');
   const [neighborhood, setNeighborhood] = useState('agdal');
   const [dueDate, setDueDate] = useState('');
   const [dueTime, setDueTime] = useState('12:00');
@@ -90,6 +95,7 @@ export default function CreateTaskModal({
   const cinFrontRef = useRef<HTMLInputElement>(null);
   const cinBackRef = useRef<HTMLInputElement>(null);
   const selfieRef = useRef<HTMLInputElement>(null);
+  const publishingRef = useRef(false);
 
   // File Upload Handlers (Pure Client-side base64 supporting the preview frames)
   const processFiles = (files: FileList) => {
@@ -227,6 +233,10 @@ export default function CreateTaskModal({
 
   // Final Publish Handler
   const handlePublish = async () => {
+    if (publishingRef.current || loading) {
+      return;
+    }
+
     if (!user) {
       setError(t.mustLoginToBid);
       return;
@@ -257,6 +267,7 @@ export default function CreateTaskModal({
     }
 
     try {
+      publishingRef.current = true;
       setLoading(true);
       setError(null);
 
@@ -284,6 +295,7 @@ export default function CreateTaskModal({
 
       // Construct compliant document dictionary matching PII and general structures
       const newTaskData = {
+        id: taskId,
         title: title.trim(),
         description: description.trim(),
         budget: Number(budget),
@@ -310,17 +322,14 @@ export default function CreateTaskModal({
         escrowReleased: false,
         paymentCardLast4: formatCard.slice(-4),
         paymentCardholder: cardName.trim(),
-        depositTransactionId: 'PZ-ESCR-' + Math.floor(100000 + Math.random() * 900000),
-
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
+        depositTransactionId: 'PZ-ESCR-' + Math.floor(100000 + Math.random() * 900000)
       };
 
-      const path = `tasks/${taskId}`;
       try {
-        await setDoc(doc(db, 'tasks', taskId), newTaskData);
+        await createTaskService(newTaskData, user.uid);
       } catch (err: any) {
-        handleFirestoreError(err, OperationType.WRITE, path);
+        console.error('Secure Create Task Error:', err);
+        throw err;
       }
 
       onSuccess();
@@ -331,6 +340,7 @@ export default function CreateTaskModal({
     } finally {
       setLoading(false);
       setActiveProcessStep(null);
+      publishingRef.current = false;
     }
   };
 
@@ -344,7 +354,7 @@ export default function CreateTaskModal({
       <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity" onClick={loading ? undefined : onClose} />
 
       <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
-        <div className="relative transform overflow-hidden rounded-3xl bg-white text-right shadow-2xl transition-all sm:my-8 sm:w-full sm:max-w-2xl flex flex-col border border-gray-150-300">
+        <div className="relative transform overflow-hidden rounded-3xl bg-white text-right shadow-2xl transition-all sm:my-8 sm:w-full sm:max-w-2xl flex flex-col border border-gray-200">
           
           {/* Header */}
           <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between bg-sky-50/10">
@@ -707,7 +717,7 @@ export default function CreateTaskModal({
                     <span className="text-[10px] text-gray-400 font-extrabold">{isRTL ? 'الصور التوضيحية المرفقة:' : 'Photos jointes :'}</span>
                     <div className="flex flex-wrap gap-2.5">
                       {uploadedImages.map((src, index) => (
-                        <div key={index} className="w-16 h-16 rounded-lg overflow-hidden border border-gray-150-300">
+                        <div key={index} className="w-16 h-16 rounded-lg overflow-hidden border border-gray-200">
                           <img 
                             src={src} 
                             alt="preview" 

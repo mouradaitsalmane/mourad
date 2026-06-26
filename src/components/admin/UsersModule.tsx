@@ -10,11 +10,15 @@ import {
   AlertCircle, 
   ShieldAlert, 
   Award,
-  Wallet
+  Wallet,
+  Edit2,
+  Save,
+  Unlock
 } from 'lucide-react';
 import { UserProfile } from '../../types';
-
 import { Task } from '../../types';
+import { sendPasswordResetEmail } from 'firebase/auth';
+import { auth } from '../../lib/firebase';
 
 // Let's declare local WorkerVerificationRequest in case it isn't fully defined globally
 interface WorkerReq {
@@ -41,6 +45,7 @@ interface UsersModuleProps {
   tasks: Task[]; // Integrated for strict orders mapping
   onToggleBlockUser: (userId: string, isCurrentlySuspended: boolean) => void;
   onDeleteUser: (userId: string) => void;
+  onUpdateUserProfile: (userId: string, updatedData: any) => void;
   onSelectUserForFiles: (user: UserProfile) => void;
   onApproveFreelancer: (reqId: string, userId: string) => void;
   onRejectFreelancer: (reqId: string, name: string) => void;
@@ -59,6 +64,7 @@ export default function UsersModule({
   tasks,
   onToggleBlockUser,
   onDeleteUser,
+  onUpdateUserProfile,
   onSelectUserForFiles,
   onApproveFreelancer,
   onRejectFreelancer,
@@ -70,12 +76,28 @@ export default function UsersModule({
   // Selected user for full Provider / Client Detail Modal
   const [detailedUser, setDetailedUser] = useState<UserProfile | null>(null);
 
+  // Edit Mode states
+  const [isEditing, setIsEditing] = useState(false);
+  const [editFields, setEditFields] = useState({
+    displayName: '',
+    location: '',
+    bio: '',
+    isVerifiedTasker: false,
+    rating: '4.9',
+    reviewsCount: 0
+  });
+
+  // Confirm states
+  const [userToDelete, setUserToDelete] = useState<string | null>(null);
+  const [userToToggleBlock, setUserToToggleBlock] = useState<{ uid: string; isSuspended: boolean } | null>(null);
+
   // Filter our list based on the module selection (customers vs providers)
   const isFreelancerTab = userType === 'providers';
 
   const filteredUsers = users.filter((u) => {
-    // Determine type
-    const matchesType = isFreelancerTab ? u.isTasker : !u.isTasker;
+    // Determine type (check role first, else fall back to isTasker list)
+    const isActuallyTasker = u.role ? (u.role === 'tasker') : u.isTasker;
+    const matchesType = isFreelancerTab ? isActuallyTasker : !isActuallyTasker;
     
     // Search filter
     const searchLower = searchQuery.toLowerCase();
@@ -102,11 +124,35 @@ export default function UsersModule({
     return tasks.filter(t => t.posterId === userId).length;
   };
 
-  // Simulated provider reset password trigger
-  const handleResetPasswordSimulated = (userName: string) => {
-    alert(isRTL 
-      ? `تم إيقاظ خادم البريد السحابي! رصيد معطيات إعادة التعيين لـ ${userName} متاح الآن.` 
-      : `Lien de réinitialisation généré et envoyé à ${userName} avec succès !`);
+  const handleOpenDetailModal = (usr: UserProfile) => {
+    setDetailedUser(usr);
+    setEditFields({
+      displayName: usr.displayName || '',
+      location: usr.location || '',
+      bio: usr.bio || '',
+      isVerifiedTasker: usr.isVerifiedTasker === true,
+      rating: String(usr.rating || '4.9'),
+      reviewsCount: usr.reviewsCount || 0
+    });
+    setIsEditing(false);
+  };
+
+  // Real password reset link via Firebase Auth
+  const handleSendResetEmail = async (email: string) => {
+    if (!email) {
+      alert(isRTL ? 'البريد الإلكتروني غير متوفر لهذا العضو!' : 'No email address registered for this profile.');
+      return;
+    }
+    try {
+      await sendPasswordResetEmail(auth, email);
+      alert(isRTL 
+        ? `تم إرسال رابط حقيقي لإعادة تعيين كلمة المرور إلى البريد الإلكتروني ${email} بنجاح!` 
+        : `A genuine password reset email has been successfully sent to ${email}!`);
+    } catch (err: any) {
+      alert(isRTL 
+        ? `خطأ أثناء إرسال الرابط: ${err.message}` 
+        : `Failed to send password reset: ${err.message}`);
+    }
   };
 
   return (
@@ -266,11 +312,12 @@ export default function UsersModule({
                 const emailAddress = userEmails[usr.uid] || '---';
 
                 // Let's generate a mock wallet balance for this enterprise panel
+                const isTaskerRole = usr.role ? (usr.role === 'tasker') : !!usr.isTasker;
                 const walletBalance = (usr as any).walletBalance !== undefined 
                   ? (usr as any).walletBalance 
                   : (usr.isVerifiedTasker ? 450 : 120);
 
-                const ordersCount = getUserOrderCount(usr.uid, usr.isTasker);
+                const ordersCount = getUserOrderCount(usr.uid, isTaskerRole);
 
                 return (
                   <tr key={usr.uid} className="hover:bg-slate-100/40 dark:hover:bg-slate-900/15 transition-all border-b dark:border-slate-850">
@@ -300,11 +347,11 @@ export default function UsersModule({
                     {/* 3. Role */}
                     <td className="p-3.5 text-left">
                       <span className={`px-2 py-0.5 rounded-md font-bold text-[9px] uppercase ${
-                        usr.isTasker 
+                        isTaskerRole 
                           ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-400' 
                           : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400'
                       }`}>
-                        {usr.isTasker ? (isRTL ? 'حرفي منفذ' : 'Provider') : (isRTL ? 'زبون طالب' : 'Customer')}
+                        {isTaskerRole ? (isRTL ? 'حرفي منفذ' : 'Provider') : (isRTL ? 'زبون طالب' : 'Customer')}
                       </span>
                     </td>
 
@@ -336,13 +383,13 @@ export default function UsersModule({
                     {/* 7. Actions */}
                     <td className="p-3.5 text-center flex items-center justify-center gap-1.5">
                       <button
-                        onClick={() => setDetailedUser(usr)}
+                        onClick={() => handleOpenDetailModal(usr)}
                         className="px-2.5 py-1.5 bg-sky-50 dark:bg-sky-500/10 text-sky-700 dark:text-sky-300 rounded-lg text-[9.5px] font-black cursor-pointer hover:bg-sky-100 transition-all"
                       >
                         {isRTL ? 'تفاصيل KYC' : 'Verify Details'}
                       </button>
                       <button
-                        onClick={() => onToggleBlockUser(usr.uid, isSuspended)}
+                        onClick={() => setUserToToggleBlock({ uid: usr.uid, isSuspended })}
                         disabled={processingUsers[usr.uid] === true}
                         className={`px-2.5 py-1.5 rounded-lg text-[9.5px] font-black cursor-pointer transition-all ${
                           processingUsers[usr.uid] === true 
@@ -357,7 +404,7 @@ export default function UsersModule({
                           : isSuspended ? (isRTL ? 'تنشيط' : 'Activate') : (isRTL ? 'حظر' : 'Suspend 🛑')}
                       </button>
                       <button
-                        onClick={() => onDeleteUser(usr.uid)}
+                        onClick={() => setUserToDelete(usr.uid)}
                         disabled={processingUsers[usr.uid] === true}
                         className={`p-1 px-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg transition-all cursor-pointer border border-rose-150/50 dark:bg-rose-500/10 dark:text-rose-400 dark:border-transparent ${
                           processingUsers[usr.uid] === true ? 'opacity-30 cursor-not-allowed' : ''
@@ -409,32 +456,137 @@ export default function UsersModule({
                 <div className={`md:col-span-5 p-5 rounded-2xl border flex flex-col items-center text-center gap-3 relative ${
                   isDarkMode ? 'bg-slate-950/30 border-slate-800' : 'bg-slate-50/50 border-gray-150'
                 }`}>
-                  <div className="w-16 h-16 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-black text-xl shadow-lg">
+                  <div className="absolute top-2 right-2 flex gap-1">
+                    {/* EDIT TRIGGER TOGGLE */}
+                    {isEditing ? (
+                      <button
+                        onClick={() => {
+                          onUpdateUserProfile(detailedUser.uid, {
+                            displayName: editFields.displayName,
+                            location: editFields.location,
+                            bio: editFields.bio,
+                            isVerifiedTasker: editFields.isVerifiedTasker,
+                            rating: parseFloat(editFields.rating) || 4.9,
+                            reviewsCount: parseInt(String(editFields.reviewsCount)) || 0
+                          });
+                          setDetailedUser(prev => prev ? {
+                            ...prev,
+                            displayName: editFields.displayName,
+                            location: editFields.location,
+                            bio: editFields.bio,
+                            isVerifiedTasker: editFields.isVerifiedTasker,
+                            rating: parseFloat(editFields.rating) || 4.9,
+                            reviewsCount: parseInt(String(editFields.reviewsCount)) || 0
+                          } : null);
+                          setIsEditing(false);
+                        }}
+                        className="p-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg cursor-pointer"
+                        title={isRTL ? 'حفظ' : 'Save'}
+                      >
+                        <Save className="w-3.5 h-3.5" />
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => setIsEditing(true)}
+                        className="p-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg cursor-pointer"
+                        title={isRTL ? 'تعديل' : 'Edit'}
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="w-16 h-16 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-black text-xl shadow-lg mt-4">
                     {detailedUser.displayName ? detailedUser.displayName.charAt(0).toUpperCase() : '?'}
                   </div>
-                  <div className="flex flex-col items-center">
-                    <span className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-1 justify-center">
-                      {detailedUser.displayName}
-                      {detailedUser.isVerifiedTasker && <Award className="w-4.5 h-4.5 text-indigo-500" />}
-                    </span>
-                    <span className="text-[10px] font-mono text-indigo-400 mt-1 select-all">{detailedUser.uid}</span>
-                    <span className="text-[10px] text-gray-405 mt-0.5">{userEmails[detailedUser.uid] || 'amine.kyc@airtasker.ma'}</span>
-                  </div>
 
-                  <div className="w-full mt-2 border-t pt-2.5 text-xs text-slate-600 dark:text-slate-400 flex flex-col gap-1.5">
-                    <div className="flex justify-between flex-row-reverse">
-                      <span className="text-gray-400">{isRTL ? 'موقع السكن' : 'Lieu :'}</span>
-                      <span className="font-bold flex items-center gap-0.5"><MapPin className="w-3 h-3 text-red-500" /> {detailedUser.location || (isRTL ? 'أكدال، الرباط' : 'Agdal, Rabat')}</span>
+                  {isEditing ? (
+                    <div className="w-full flex flex-col gap-2.5 text-xs text-right">
+                      <div>
+                        <label className="text-[10px] text-gray-400 font-extrabold block mb-1">{isRTL ? 'الاسم المعروض' : 'Display name:'}</label>
+                        <input
+                          type="text"
+                          value={editFields.displayName}
+                          onChange={(e) => setEditFields(prev => ({ ...prev, displayName: e.target.value }))}
+                          className="w-full p-2 bg-slate-100 dark:bg-slate-800 rounded-xl focus:outline-none focus:ring-1 focus:ring-indigo-500 font-bold"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-gray-400 font-extrabold block mb-1">{isRTL ? 'موقع السكن' : 'Location:'}</label>
+                        <input
+                          type="text"
+                          value={editFields.location}
+                          onChange={(e) => setEditFields(prev => ({ ...prev, location: e.target.value }))}
+                          className="w-full p-2 bg-slate-100 dark:bg-slate-800 rounded-xl focus:outline-none focus:ring-1 focus:ring-indigo-500 font-bold"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] text-gray-400 font-extrabold block mb-1">{isRTL ? 'التقييم' : 'Rating:'}</label>
+                          <input
+                            type="text"
+                            value={editFields.rating}
+                            onChange={(e) => setEditFields(prev => ({ ...prev, rating: e.target.value }))}
+                            className="w-full p-2 bg-slate-100 dark:bg-slate-800 rounded-xl focus:outline-none focus:ring-1 focus:ring-indigo-500 font-bold font-mono text-center"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-gray-400 font-extrabold block mb-1">{isRTL ? 'التقييمات' : 'ReviewsCount:'}</label>
+                          <input
+                            type="number"
+                            value={editFields.reviewsCount}
+                            onChange={(e) => setEditFields(prev => ({ ...prev, reviewsCount: Number(e.target.value) || 0 }))}
+                            className="w-full p-2 bg-slate-100 dark:bg-slate-800 rounded-xl focus:outline-none focus:ring-1 focus:ring-indigo-500 font-bold font-mono text-center"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-gray-400 font-extrabold block mb-1">{isRTL ? 'السيرة الذاتية' : 'Biography:'}</label>
+                        <textarea
+                          value={editFields.bio}
+                          onChange={(e) => setEditFields(prev => ({ ...prev, bio: e.target.value }))}
+                          rows={2}
+                          className="w-full p-2 bg-slate-100 dark:bg-slate-800 rounded-xl focus:outline-none focus:ring-1 focus:ring-indigo-500 font-bold"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1.5 justify-end mt-1 cursor-pointer">
+                        <label htmlFor="isVerifiedField" className="text-[10px] text-gray-400 font-extrabold cursor-pointer">{isRTL ? 'حساب معتمد وموثق' : 'Verified Badge:'}</label>
+                        <input
+                          id="isVerifiedField"
+                          type="checkbox"
+                          checked={editFields.isVerifiedTasker}
+                          onChange={(e) => setEditFields(prev => ({ ...prev, isVerifiedTasker: e.target.checked }))}
+                          className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 rounded cursor-pointer"
+                        />
+                      </div>
                     </div>
-                    <div className="flex justify-between flex-row-reverse text-right mt-1">
-                      <span className="text-gray-400">{isRTL ? 'التقييم العام' : 'Score d\'avis :'}</span>
-                      <span className="font-extrabold text-[#f59e0b] font-mono">★ {detailedUser.rating || '4.9'} ({detailedUser.reviewsCount || 0} reviews)</span>
-                    </div>
-                  </div>
+                  ) : (
+                    <>
+                      <div className="flex flex-col items-center">
+                        <span className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-1 justify-center">
+                          {detailedUser.displayName}
+                          {detailedUser.isVerifiedTasker && <Award className="w-4.5 h-4.5 text-indigo-500" />}
+                        </span>
+                        <span className="text-[10px] font-mono text-indigo-400 mt-1 select-all">{detailedUser.uid}</span>
+                        <span className="text-[10px] text-gray-405 mt-0.5">{userEmails[detailedUser.uid] || 'amine.kyc@airtasker.ma'}</span>
+                      </div>
 
-                  <div className="w-full border-t pt-2 mt-1 text-center text-[10.5px] italic text-slate-500">
-                    "{detailedUser.bio || (isRTL ? 'لا يوجد نبذة سيرة شخصية مدرجة للعميل أو الشريك.' : 'Aucun biographie disponible.')}"
-                  </div>
+                      <div className="w-full mt-2 border-t pt-2.5 text-xs text-slate-600 dark:text-slate-400 flex flex-col gap-1.5">
+                        <div className="flex justify-between flex-row-reverse">
+                          <span className="text-gray-400">{isRTL ? 'موقع السكن' : 'Lieu :'}</span>
+                          <span className="font-bold flex items-center gap-0.5"><MapPin className="w-3 h-3 text-red-500" /> {detailedUser.location || (isRTL ? 'أكدال، الرباط' : 'Agdal, Rabat')}</span>
+                        </div>
+                        <div className="flex justify-between flex-row-reverse text-right mt-1">
+                          <span className="text-gray-400">{isRTL ? 'التقييم العام' : 'Score d\'avis :'}</span>
+                          <span className="font-extrabold text-[#f59e0b] font-mono">★ {detailedUser.rating || '4.9'} ({detailedUser.reviewsCount || 0} reviews)</span>
+                        </div>
+                      </div>
+
+                      <div className="w-full border-t pt-2 mt-1 text-center text-[10.5px] italic text-slate-500">
+                        "{detailedUser.bio || (isRTL ? 'لا يوجد نبذة سيرة شخصية مدرجة للعميل أو الشريك.' : 'Aucun biographie disponible.')}"
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 {/* 2. StatsGrid + EarningsChart (Span 7) */}
@@ -567,7 +719,7 @@ export default function UsersModule({
               {/* 5. ActionPanel administrative keys */}
               <div className="border-t dark:border-slate-800 pt-4 mt-2 flex flex-wrap justify-end gap-2.5">
                 <button
-                  onClick={() => handleResetPasswordSimulated(detailedUser.displayName)}
+                  onClick={() => handleSendResetEmail(userEmails[detailedUser.uid])}
                   className="px-4 py-2 bg-indigo-650 hover:bg-indigo-700 text-white rounded-xl text-xs font-black cursor-pointer transition-all shrink-0"
                 >
                   {isRTL ? 'إرسال رابط استعادة كلمة المرور' : 'Reset Password Link'}
@@ -585,8 +737,7 @@ export default function UsersModule({
                 <button
                   onClick={() => {
                     const isCurrentlySuspended = (detailedUser as any).isSuspended === true;
-                    onToggleBlockUser(detailedUser.uid, isCurrentlySuspended);
-                    setDetailedUser(prev => prev ? { ...prev, isSuspended: !isCurrentlySuspended } as any : null);
+                    setUserToToggleBlock({ uid: detailedUser.uid, isSuspended: isCurrentlySuspended });
                   }}
                   disabled={processingUsers[detailedUser.uid] === true}
                   className={`px-4 py-2 text-xs font-black rounded-xl cursor-pointer transition-all shrink-0 ${
@@ -607,6 +758,76 @@ export default function UsersModule({
 
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* Confirm Deletion Modal Overlay */}
+      {userToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs select-none">
+          <div className={`p-6 rounded-3xl border text-right max-w-sm w-full ${isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-gray-150 text-slate-800 shadow-xl'}`}>
+            <h3 className="text-sm font-black mb-2">{isRTL ? 'تأكيد الحذف النهائي' : 'Confirm Permanent Deletion'}</h3>
+            <p className="text-xs text-gray-400 mb-4 font-semibold leading-normal">
+              {isRTL 
+                ? 'هل أنت متأكد من رغبتك في حذف هذا المستخدم من قاعدة البيانات تماماً؟ هذا الإجراء لا يمكن التراجع عنه.' 
+                : 'Are you sure you want to permanently delete this user? This action cannot be undone.'}
+            </p>
+            <div className="flex justify-end gap-2 text-xs font-black">
+              <button 
+                onClick={() => setUserToDelete(null)}
+                className="px-4 py-2 bg-gray-100 dark:bg-slate-800 rounded-xl cursor-pointer hover:bg-slate-200"
+              >
+                {isRTL ? 'إلغاء' : 'Cancel'}
+              </button>
+              <button 
+                onClick={() => {
+                  onDeleteUser(userToDelete);
+                  setUserToDelete(null);
+                }}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl cursor-pointer"
+              >
+                {isRTL ? 'تأكيد الحذف' : 'Confirm Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm Block/Suspend Modal Overlay */}
+      {userToToggleBlock && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs select-none">
+          <div className={`p-6 rounded-3xl border text-right max-w-sm w-full ${isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-gray-150 text-slate-800 shadow-xl'}`}>
+            <h3 className="text-sm font-black mb-2">
+              {userToToggleBlock.isSuspended 
+                ? (isRTL ? 'تأكيد تنشيط العضو' : 'Confirm Profile Activation') 
+                : (isRTL ? 'تأكيد تجميد وتعليق الحساب' : 'Confirm Profile Suspension')}
+            </h3>
+            <p className="text-xs text-slate-400 mb-4 font-semibold leading-normal">
+              {userToToggleBlock.isSuspended
+                ? (isRTL ? 'هل أنت متأكد من رغبتك في إلغاء حظر هذا العضو وتمكينه من العمل والنشاط على المنصة؟' : 'Are you sure you want to reactivate this user profile to standard status?')
+                : (isRTL ? 'هل أنت متأكد من رغبتك في تعليق وحظر هذا العضو فورياً؟ لن يستطيع القيام بأي عروض عمل.' : 'Are you sure you want to suspend this user? They will be locked out of standard operations.')}
+            </p>
+            <div className="flex justify-end gap-2 text-xs font-black">
+              <button 
+                onClick={() => setUserToToggleBlock(null)}
+                className="px-4 py-2 bg-gray-100 dark:bg-slate-800 rounded-xl cursor-pointer hover:bg-slate-200"
+              >
+                {isRTL ? 'إلغاء' : 'Cancel'}
+              </button>
+              <button 
+                onClick={() => {
+                  onToggleBlockUser(userToToggleBlock.uid, userToToggleBlock.isSuspended);
+                  // Update current active details view if matches
+                  if (detailedUser && detailedUser.uid === userToToggleBlock.uid) {
+                    setDetailedUser(prev => prev ? { ...prev, isSuspended: !userToToggleBlock.isSuspended } as any : null);
+                  }
+                  setUserToToggleBlock(null);
+                }}
+                className={`px-4 py-2 text-white rounded-xl cursor-pointer ${userToToggleBlock.isSuspended ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-750'}`}
+              >
+                {userToToggleBlock.isSuspended ? (isRTL ? 'تنشيط الحساب' : 'Confirm Activation') : (isRTL ? 'حظر الحساب' : 'Confirm Suspension')}
+              </button>
+            </div>
           </div>
         </div>
       )}

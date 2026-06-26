@@ -5,7 +5,12 @@
       "description": "Public profile details of a user",
       "type": "object",
       "properties": {
+        "uid": { "type": "string", "description": "Unique user account ID" },
         "displayName": { "type": "string", "description": "Display name of the user" },
+        "email": { "type": "string", "description": "Email address of the user" },
+        "role": { "type": "string", "enum": ["client", "tasker"], "description": "Account type role for user dashboard mapping" },
+        "profileCompleted": { "type": "boolean", "description": "Whether user filled and completed their account setup" },
+        "status": { "type": "string", "enum": ["active", "suspended"], "description": "Current authorization state of account" },
         "bio": { "type": "string", "description": "Short bio description of user skills" },
         "rating": { "type": "number", "description": "Average rating of the user as a tasker or poster" },
         "reviewsCount": { "type": "number", "description": "Total reviews received" },
@@ -16,7 +21,7 @@
         "badgeUnlockedAt": { "type": "string", "format": "date-time", "description": "When verification badge was unlocked" },
         "createdAt": { "type": "string", "format": "date-time", "description": "When profile was created" }
       },
-      "required": ["displayName", "isTasker", "rating", "reviewsCount", "createdAt"]
+      "required": ["displayName", "role", "profileCompleted", "status", "createdAt"]
     },
     "UserProfilePrivate": {
       "title": "UserProfilePrivate",
@@ -180,6 +185,19 @@
         "createdAt": { "type": "string", "format": "date-time", "description": "When the file was uploaded" }
       },
       "required": ["userId", "fileName", "fileUrl", "fileType", "fileSize", "createdAt"]
+    },
+    "FAQ": {
+      "title": "FAQ",
+      "description": "Dynamic custom landing page FAQs linked to each service category feature",
+      "type": "object",
+      "properties": {
+        "featureId": { "type": "string", "description": "The categoryId / feature slug" },
+        "question": { "type": "string", "description": "FAQ Question text" },
+        "answer": { "type": "string", "description": "FAQ Answer text" },
+        "lang": { "type": "string", "description": "Arabic or French language code" },
+        "sortOrder": { "type": "number", "description": "Display rendering sorting index" }
+      },
+      "required": ["featureId", "question", "answer", "lang"]
     }
   },
   "firestore": {
@@ -234,6 +252,10 @@
     "/files/{fileId}": {
       "schema": "UploadedFile",
       "description": "Uploaded user files and attachments"
+    },
+    "/faqs/{faqId}": {
+      "schema": "FAQ",
+      "description": "Dynamic custom landing page FAQs linked to each service category feature"
     }
   }
 }

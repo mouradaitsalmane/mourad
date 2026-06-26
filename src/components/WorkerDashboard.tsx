@@ -1,21 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { 
-  collection, 
-  query, 
-  where, 
-  onSnapshot, 
-  doc, 
-  addDoc,
-  getDocs,
-  setDoc,
-  updateDoc,
-  serverTimestamp,
-  orderBy,
-  limit
-} from 'firebase/firestore';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Task, UserProfile, Offer, Review } from '../types';
 import { LanguageKey, SERVICE_CATEGORIES, RABAT_NEIGHBORHOODS } from '../data/rabatData';
+import { 
+  subscribeToUserProfile, 
+  subscribeToWithdrawals, 
+  updateProfileService, 
+  requestWithdrawalService 
+} from '../services/userService';
+import { 
+  subscribeToTasks, 
+  subscribeToTaskOffers, 
+  createBidService 
+} from '../services/taskService';
+import { subscribeToReceivedReviews } from '../services/reviewService';
+import { subscribeToRoomMessages, sendMessageService } from '../services/chatService';
 import { 
   TrendingUp, 
   ShieldCheck, 
@@ -45,6 +44,7 @@ import {
   MessageSquare, 
   MessageCircle, 
   Sliders, 
+  HelpCircle, 
   Power,
   ChevronLeft,
   ChevronUp,
@@ -52,10 +52,20 @@ import {
   Award,
   Users,
   SlidersHorizontal,
-  Bookmark
+  Bookmark,
+  Trash2,
+  Phone,
+  LayoutGrid
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useProfileCompletionStore } from '../store/profileCompletionStore';
 import RabatMap from './RabatMap';
+import TaskerDashboard from '../pages/dashboard/TaskerDashboard';
+import WorkerDashboardIncomeTab from './dashboard/WorkerDashboardIncomeTab';
+import WorkerDashboardProfileTab from './dashboard/WorkerDashboardProfileTab';
+import WorkerDashboardChatsTab from './dashboard/WorkerDashboardChatsTab';
+import WorkerDashboardJobsTab from './dashboard/WorkerDashboardJobsTab';
+import WorkerDashboardAssignedTab from './dashboard/WorkerDashboardAssignedTab';
 
 interface WorkerDashboardProps {
   user: any;
@@ -64,6 +74,7 @@ interface WorkerDashboardProps {
   onSelectTask: (task: Task) => void;
   onOpenSettings: () => void;
   onToggleToClient?: () => void; // Callback to toggle back to Client mode
+  onViewChange?: (view: string) => void;
 }
 
 interface ChatRoom {
@@ -98,13 +109,56 @@ export default function WorkerDashboard({
   lang,
   onSelectTask,
   onOpenSettings,
-  onToggleToClient
+  onToggleToClient,
+  onViewChange
 }: WorkerDashboardProps) {
   const isRTL = lang === 'ar';
 
-  // Worker active navigation tab
-  // 'income' (Earnings overview + Withdraw wallet), 'jobs' (Explore/Search jobs + interactive Map), 'assigned' (Assigned active tasks), 'chats' (Client messages), 'profile' (Skills & online status)
-  const [activeTab, setActiveTab] = useState<'income' | 'jobs' | 'assigned' | 'chats' | 'profile'>('income');
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // Determine active tab from URL path
+  let activeTab: 'dashboard' | 'income' | 'jobs' | 'assigned' | 'chats' | 'profile' | 'notifications' | 'help' = 'dashboard';
+  if (location.pathname === '/tasker/earnings') {
+    activeTab = 'income';
+  } else if (location.pathname === '/tasker/requests') {
+    activeTab = 'jobs';
+  } else if (location.pathname === '/tasker/jobs') {
+    activeTab = 'assigned';
+  } else if (location.pathname.startsWith('/tasker/chats')) {
+    activeTab = 'chats';
+  } else if (location.pathname.startsWith('/tasker/profile')) {
+    activeTab = 'profile';
+  } else if (location.pathname.startsWith('/tasker/notifications')) {
+    activeTab = 'notifications';
+  } else if (location.pathname.startsWith('/tasker/help')) {
+    activeTab = 'help';
+  }
+
+  const handleTabClick = (tabId: string) => {
+    if (tabId === 'dashboard') {
+      navigate('/tasker/dashboard');
+    } else if (tabId === 'income') {
+      navigate('/tasker/earnings');
+    } else if (tabId === 'jobs') {
+      navigate('/tasker/requests');
+    } else if (tabId === 'assigned') {
+      navigate('/tasker/jobs');
+    } else if (tabId === 'chats') {
+      navigate('/tasker/chats');
+    } else if (tabId === 'profile') {
+      navigate('/tasker/profile');
+    } else if (tabId === 'notifications') {
+      navigate('/tasker/notifications');
+    } else if (tabId === 'help') {
+      navigate('/tasker/help');
+    }
+  };
+
+  const setActiveTab = (tabId: 'dashboard' | 'income' | 'jobs' | 'assigned' | 'chats' | 'profile' | 'notifications' | 'help') => {
+    handleTabClick(tabId);
+  };
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Real-time worker profile state loaded from firestore (syncs online status etc)
   const [myProfile, setMyProfile] = useState<UserProfile | null>(userProfile);
@@ -158,6 +212,77 @@ export default function WorkerDashboard({
   const [loadingChats, setLoadingChats] = useState(true);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  // Notifications State
+  const [notificationsList, setNotificationsList] = useState<any[]>(() => {
+    const defaultNotifs = [
+      {
+        id: 'wn1',
+        titleAr: 'مرحباً بك كشريك حرفي في الرباط! 🛠️',
+        titleFr: 'Bienvenue en tant que prestataire ! 🛠️',
+        descAr: 'تصفح خريطة المهام الشاغرة الآن وقدم عروضك مباشرة للعملاء لبدء العمل والربح.',
+        descFr: 'Consultez la carte des missions disponibles et envoyez des offres pour commencer à gagner.',
+        timeAr: 'منذ دقيقة',
+        timeFr: 'Il y a 1 min',
+        read: false,
+        type: 'welcome'
+      },
+      {
+        id: 'wn2',
+        titleAr: 'شروط الدفع الآمن ونظام الضمان (Escrow) 💳',
+        titleFr: 'Règles de paiement sécurisé (Escrow) 💳',
+        descAr: 'عند اختيار عرضك، يتم تأمين ميزانية المهمة في المنصة. ابدأ بالعمل فوراً بمجرد الحجز لضمان مستحقاتك.',
+        descFr: 'Dès que votre offre est acceptée, le budget est bloqué. Travaillez l\'esprit tranquille !',
+        timeAr: 'منذ ساعتين',
+        timeFr: 'Il y a 2h',
+        read: false,
+        type: 'security'
+      },
+      {
+        id: 'wn3',
+        titleAr: 'الحصول على شارة التحقق PRO 🌟',
+        titleFr: 'Comment obtenir le badge PRO ? 🌟',
+        descAr: 'قم بملء ملفك المهني وأرفق مهاراتك الدقيقة في الإعدادات لمساعدتنا في ترقية حسابك لشريك PRO معتمد.',
+        descFr: 'Complétez votre profil pour obtenir le badge PRO et doubler vos chances d\'être sélectionné.',
+        timeAr: 'منذ يوم',
+        timeFr: 'Hier',
+        read: true,
+        type: 'announcement'
+      }
+    ];
+    const saved = localStorage.getItem('rabattasker_worker_notifications');
+    return saved ? JSON.parse(saved) : defaultNotifs;
+  });
+
+  const saveNotifications = (list: any[]) => {
+    setNotificationsList(list);
+    localStorage.setItem('rabattasker_worker_notifications', JSON.stringify(list));
+  };
+
+  const handleMarkAsRead = (id: string) => {
+    const updated = notificationsList.map(n => n.id === id ? { ...n, read: true } : n);
+    saveNotifications(updated);
+  };
+
+  const handleMarkAllAsRead = () => {
+    const updated = notificationsList.map(n => ({ ...n, read: true }));
+    saveNotifications(updated);
+  };
+
+  const handleDeleteNotification = (id: string) => {
+    const updated = notificationsList.filter(n => n.id !== id);
+    saveNotifications(updated);
+  };
+
+  const [activeFaqIndex, setActiveFaqIndex] = useState<number | null>(null);
+  const [supportCategory, setSupportCategory] = useState('general');
+  const [supportMessage, setSupportMessage] = useState('');
+  const [supportSuccess, setSupportSuccess] = useState(false);
+
+  // Guards to prevent double clicks and duplicate operations
+  const withdrawalLockRef = useRef(false);
+  const bidSubmitLockRef = useRef(false);
+  const profileLockRef = useRef(false);
+
   // Editable profile information
   const [editBio, setEditBio] = useState<string>(userProfile?.bio || '');
   const [editLocation, setEditLocation] = useState<string>(userProfile?.location || 'agdal');
@@ -178,32 +303,26 @@ export default function WorkerDashboard({
   // 1. Sync current worker profile metadata in real-time
   useEffect(() => {
     if (!user) return;
-    const unsub = onSnapshot(doc(db, 'users', user.uid), (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data() as UserProfile;
-        setMyProfile(data);
-        setIsOnline(data.isOnline ?? true);
-        if (data.bio) setEditBio(data.bio);
-        if (data.location) setEditLocation(data.location);
-        if (data.minimumRate) setEditMinRate(data.minimumRate);
-        if (data.skills) setEditSkills(data.skills);
-      }
-    }, (err) => {
-      console.error("Error watching user profile real-time:", err);
+    const unsub = subscribeToUserProfile(user.uid, (data) => {
+      setMyProfile(data);
+      setIsOnline(data.isOnline ?? true);
+      if (data.bio) setEditBio(data.bio);
+      if (data.location) setEditLocation(data.location);
+      if (data.minimumRate) setEditMinRate(data.minimumRate);
+      if (data.skills) setEditSkills(data.skills);
     });
     return () => unsub();
   }, [user]);
 
   // 2. Sync all Tasks in the system
   useEffect(() => {
-    const q = query(collection(db, 'tasks'));
-    const unsub = onSnapshot(q, (snap) => {
+    if (!user) return;
+    const unsub = subscribeToTasks((tasksList) => {
       const openList: Task[] = [];
       const assignedList: Task[] = [];
       const completedList: Task[] = [];
 
-      snap.forEach((docSnap) => {
-        const t = { id: docSnap.id, ...docSnap.data() } as Task;
+      tasksList.forEach((t) => {
         if (t.status === 'open' || t.status === 'held') {
           openList.push(t);
         } else if (t.status === 'assigned' && t.taskerId === user?.uid) {
@@ -229,15 +348,13 @@ export default function WorkerDashboard({
 
       // Once tasks are loaded, set up real-time listener for worker's submitted offers
       if (user) {
-        snap.forEach((taskDoc) => {
-          const offersRef = collection(db, 'tasks', taskDoc.id, 'offers');
-          const qOffers = query(offersRef, where('taskerId', '==', user.uid));
-          onSnapshot(qOffers, (offerSnap) => {
-            if (!offerSnap.empty) {
-              const oDoc = offerSnap.docs[0];
+        tasksList.forEach((t) => {
+          subscribeToTaskOffers(t.id, (offersList) => {
+            const myOfferForTask = offersList.find(o => o.taskerId === user.uid);
+            if (myOfferForTask) {
               setMyOffers(prev => ({
                 ...prev,
-                [taskDoc.id]: { id: oDoc.id, ...oDoc.data() } as Offer
+                [t.id]: myOfferForTask
               }));
             }
           });
@@ -257,12 +374,7 @@ export default function WorkerDashboard({
   // 3. Load reviews left for this worker
   useEffect(() => {
     if (!user) return;
-    const q = query(collection(db, 'reviews'), where('revieweeId', '==', user.uid));
-    const unsub = onSnapshot(q, (snap) => {
-      const rList: Review[] = [];
-      snap.forEach((docSnap) => {
-        rList.push({ id: docSnap.id, ...docSnap.data() } as Review);
-      });
+    const unsub = subscribeToReceivedReviews(user.uid, (rList) => {
       setMyReviews(rList);
       setLoadingReviews(false);
     }, (err) => {
@@ -275,19 +387,8 @@ export default function WorkerDashboard({
   // 4. Withdrawal transaction history listener
   useEffect(() => {
     if (!user) return;
-    const q = query(
-      collection(db, 'withdrawals'), 
-      where('workerId', '==', user.uid),
-      orderBy('createdAt', 'desc')
-    );
-    const unsub = onSnapshot(q, (snap) => {
-      const wList: WithdrawalRecord[] = [];
-      snap.forEach((docSnap) => {
-        wList.push({ id: docSnap.id, ...docSnap.data() } as WithdrawalRecord);
-      });
+    const unsub = subscribeToWithdrawals(user.uid, (wList) => {
       setWithdrawalHistory(wList);
-    }, (err) => {
-      console.warn("Withdrawal collection not initialized. Switched to fallback local state logs.", err);
     });
     return () => unsub();
   }, [user]);
@@ -297,23 +398,18 @@ export default function WorkerDashboard({
     if (!user) return;
     setLoadingChats(true);
 
-    const q = query(collection(db, 'tasks'));
-    const unsub = onSnapshot(q, async (snap) => {
+    const unsub = subscribeToTasks((tasksList) => {
       const rooms: ChatRoom[] = [];
-      const promises: Promise<any>[] = [];
 
-      snap.forEach((taskDoc) => {
-        const taskObj = taskDoc.data() as Task;
-        taskObj.id = taskDoc.id;
-
+      tasksList.forEach((taskObj) => {
         // Current worker is assigned OR has an offer submitted
-        const hasMyOffer = myOffers[taskDoc.id];
+        const hasMyOffer = myOffers[taskObj.id];
         const isAssignedToMe = taskObj.taskerId === user.uid;
 
         if (isAssignedToMe || hasMyOffer) {
           rooms.push({
-            id: `${taskDoc.id}_${user.uid}`,
-            taskId: taskDoc.id,
+            id: `${taskObj.id}_${user.uid}`,
+            taskId: taskObj.id,
             taskTitle: taskObj.title,
             otherPartyId: taskObj.posterId,
             otherPartyName: taskObj.posterName
@@ -342,24 +438,11 @@ export default function WorkerDashboard({
   // 6. Live Chat messages subscriber
   useEffect(() => {
     if (!activeRoom) return;
-    const messagesRef = collection(db, 'chatMessages');
-    const q = query(
-      messagesRef, 
-      where('roomId', '==', activeRoom.id), 
-      orderBy('createdAt', 'asc'), 
-      limit(100)
-    );
-    const unsub = onSnapshot(q, (snap) => {
-      const list: ChatMessage[] = [];
-      snap.forEach((docSnap) => {
-        list.push({ id: docSnap.id, ...docSnap.data() } as ChatMessage);
-      });
+    const unsub = subscribeToRoomMessages(activeRoom.id, (list) => {
       setMessages(list);
       setTimeout(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       }, 50);
-    }, (err) => {
-      console.warn("Messages collection loading status: OK", err);
     });
     return () => unsub();
   }, [activeRoom]);
@@ -369,19 +452,18 @@ export default function WorkerDashboard({
     e.preventDefault();
     if (!user || !activeRoom || !newMessageText.trim()) return;
 
-    const messagePayload = {
-      roomId: activeRoom.id,
-      senderId: user.uid,
-      senderName: myProfile?.displayName || user.displayName || 'الحرفي المحترف',
-      text: newMessageText.trim(),
-      createdAt: serverTimestamp()
-    };
-
+    const currentText = newMessageText.trim();
     try {
       setNewMessageText('');
-      await addDoc(collection(db, 'chatMessages'), messagePayload);
-    } catch (err) {
-      console.error("Failed to post message:", err);
+      await sendMessageService({
+        roomId: activeRoom.id,
+        senderId: user.uid,
+        senderName: myProfile?.displayName || user.displayName || 'الحرفي المحترف',
+        text: currentText
+      });
+    } catch (err: any) {
+      console.error("Failed to post message securely:", err);
+      alert(err.message || 'Error occurred sending message.');
     }
   };
 
@@ -391,10 +473,7 @@ export default function WorkerDashboard({
     const nextStatus = !isOnline;
     setIsOnline(nextStatus);
     try {
-      await updateDoc(doc(db, 'users', user.uid), {
-        isOnline: nextStatus,
-        updatedAt: serverTimestamp()
-      });
+      await updateProfileService({ userUid: user.uid, isOnline: nextStatus } as any);
     } catch (err) {
       console.error("Failed to sync online status with Firestore", err);
     }
@@ -403,7 +482,34 @@ export default function WorkerDashboard({
   // Submit Bid/Offer to Task
   const handleSubmitOffer = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (bidSubmitLockRef.current || placingBidInProgress) return;
     if (!user || !focusedTask) return;
+
+    // 1. Bid protection: Block bids if profile completion < 80%
+    let score = myProfile?.profileCompletion ?? 0;
+    if (!score) {
+      let calculated = 0;
+      if (myProfile?.photoURL && myProfile?.photoURL.trim() !== '') calculated += 20;
+      if (myProfile?.phoneVerified === true) calculated += 20;
+      if (myProfile?.dob || myProfile?.hasDob === true) calculated += 10;
+      if (myProfile?.location || myProfile?.hasAddress === true) calculated += 10;
+      if (myProfile?.skills && myProfile.skills.length > 0) calculated += 10;
+      if (myProfile?.bio && myProfile?.headline) calculated += 10;
+      if (myProfile?.verificationStatus === 'approved' || myProfile?.identityVerified === true || myProfile?.isVerifiedTasker === true) calculated += 10;
+      if (myProfile?.hasBanking === true) calculated += 10;
+      score = Math.min(calculated, 100);
+    }
+
+    if (score < 80) {
+      const msgAr = `عذراً! لا يمكنك تقديم العروض حتى تكتمل نسبة توثيق وتعبئة ملفك الشخصي إلى 80٪ على الأقل (نسبتك الحالية: ${score}٪). يرجى إتمام الخطوات المتبقية الآن.`;
+      const msgFr = `Action requise! Vous ne pouvez pas soumettre d'offres tant que votre profil n'est pas complété à au moins 80% (votre niveau actuel: ${score}%). Veuillez compléter vos étapes maintenant.`;
+      alert(isRTL ? msgAr : msgFr);
+      
+      // Open the onboarding modal at step 1
+      useProfileCompletionStore.getState().openCompletionModal(1);
+      return;
+    }
+
     if (pitchAmount <= 40) {
       alert(isRTL ? 'الرجاء تحديد عرض سعر مناسب لا يقل عن 50 درهم مغربي.' : 'Le budget minimal pour une offre est de 50 MAD.');
       return;
@@ -413,29 +519,21 @@ export default function WorkerDashboard({
       return;
     }
 
-    setPlacingBidInProgress(true);
-    const offerId = 'offer_' + user.uid + '_' + Math.random().toString(36).substring(2, 6);
-    const offerData = {
-      taskId: focusedTask.id,
-      taskerId: user.uid,
-      taskerName: myProfile?.displayName || user.displayName || 'حرفي خبير بالرباط',
-      taskerPhoto: user.photoURL || '',
-      amount: Number(pitchAmount),
-      message: pitchMessage.trim(),
-      status: 'pending',
-      createdAt: serverTimestamp()
-    };
-
     try {
-      // 1. Submit Offer subcollection doc
-      await setDoc(doc(db, 'tasks', focusedTask.id, 'offers', offerId), offerData);
-      
-      // 2. Increment offers count on the main task
-      const currentOffersCount = focusedTask.offersCount || 0;
-      await updateDoc(doc(db, 'tasks', focusedTask.id), {
-        offersCount: currentOffersCount + 1,
-        updatedAt: serverTimestamp()
-      });
+      bidSubmitLockRef.current = true;
+      setPlacingBidInProgress(true);
+      const secureBidData = {
+        taskId: focusedTask.id,
+        taskerId: user.uid,
+        workerName: myProfile?.displayName || user.displayName || 'حرفي خبير بالرباط',
+        taskerName: myProfile?.displayName || user.displayName || 'حرفي خبير بالرباط',
+        taskerPhoto: user.photoURL || '',
+        amount: Number(pitchAmount),
+        message: pitchMessage.trim(),
+        status: 'pending'
+      };
+
+      await createBidService(secureBidData, user.uid);
 
       setBidSuccessMessage(isRTL ? 'تهانينا! تم إرسال عرضك الفني بنجاح لصاحب المهمة. تواصل معه للاتفاق!' : 'Votre proposition de tarif a été transmise avec succès ! Nous vous notifierons.');
       setPitchMessage('');
@@ -443,35 +541,40 @@ export default function WorkerDashboard({
       setTimeout(() => {
         setBidSuccessMessage(null);
         setFocusedTask(null);
-      }, 3500);
+      }, 3550);
     } catch (err: any) {
       console.error(err);
-      alert('Error placing bid. Please try again.');
+      alert(err.message || 'Error placing bid. Please try again.');
     } finally {
       setPlacingBidInProgress(false);
+      bidSubmitLockRef.current = false;
     }
   };
 
   // Worker Profile & Specialties modification
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (profileLockRef.current || savingProfile) return;
     if (!user) return;
-    setSavingProfile(true);
 
     try {
-      await updateDoc(doc(db, 'users', user.uid), {
+      profileLockRef.current = true;
+      setSavingProfile(true);
+      await updateProfileService({
+        userUid: user.uid,
         bio: editBio,
         location: editLocation,
         minimumRate: Number(editMinRate),
-        skills: editSkills,
-        updatedAt: serverTimestamp()
-      });
+        skills: editSkills
+      } as any);
       setProfileSuccessAlert(true);
       setTimeout(() => setProfileSuccessAlert(false), 4000);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to save profile", err);
+      alert(err.message || 'Error occurred saving profile.');
     } finally {
       setSavingProfile(false);
+      profileLockRef.current = false;
     }
   };
 
@@ -486,6 +589,7 @@ export default function WorkerDashboard({
   // Withdraw Earnings from wallet
   const handleWithdrawFunds = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (withdrawalLockRef.current || withdrawingInProgress) return;
     if (!user) return;
 
     const availableBalance = completedTasks.reduce((sum, t) => sum + t.budget, 0);
@@ -502,29 +606,27 @@ export default function WorkerDashboard({
       return;
     }
 
-    setWithdrawingInProgress(true);
     try {
-      const wdPayload = {
-        workerId: user.uid,
-        workerName: myProfile?.displayName || user.displayName,
+      withdrawalLockRef.current = true;
+      setWithdrawingInProgress(true);
+      await requestWithdrawalService({
+        userId: user.uid,
         amount: Number(withdrawalAmount),
         bankName: selectedBank,
-        rib: ribInput.trim(),
-        status: 'pending',
-        createdAt: serverTimestamp()
-      };
+        bankAccount: ribInput.trim(),
+        workerName: myProfile?.displayName || user.displayName
+      } as any);
 
-      await addDoc(collection(db, 'withdrawals'), wdPayload);
-      
-      // Zero out or log the local transaction simulations
       setWithdrawSuccess(true);
       setRibInput('');
       
       setTimeout(() => setWithdrawSuccess(false), 4500);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      alert(isRTL ? `فشل طلب السحب: ${err.message}` : `Échec de virement: ${err.message}`);
     } finally {
       setWithdrawingInProgress(false);
+      withdrawalLockRef.current = false;
     }
   };
 
@@ -553,7 +655,7 @@ export default function WorkerDashboard({
 
   // Quick Action category renderer helper
   const getCategoryTheme = (catId: string) => {
-    const defaultIcon = <Sliders className="w-5 h-5 text-indigo-500" />;
+    const defaultIcon = <Sliders className="w-5 h-5 text-indigo-505" />;
     const found = SERVICE_CATEGORIES.find(c => c.id === catId);
     if (!found) return { name: catId, icon: defaultIcon, color: 'bg-indigo-50 text-indigo-700' };
 
@@ -567,904 +669,619 @@ export default function WorkerDashboard({
     }
   };
 
+  const sidebarItems = [
+    { id: 'dashboard', labelAr: 'لوحة القيادة والمؤشرات', labelFr: 'Tableau de bord', icon: LayoutGrid },
+    { id: 'jobs', labelAr: 'خريطة المهام الشاغرة', labelFr: 'Trouver des Missions', icon: Map },
+    { id: 'assigned', labelAr: 'مهامي المكلف بها', labelFr: 'Prestations en cours', icon: CheckCircle2 },
+    { id: 'chats', labelAr: 'الرسائل والمحادثات', labelFr: 'Messages', icon: MessageSquare },
+    { id: 'notifications', labelAr: 'التنبيهات والإشعارات', labelFr: 'Notifications', icon: Bell },
+    { id: 'help', labelAr: 'مركز المساعدة والدعم', labelFr: 'Help & Support', icon: HelpCircle },
+    { id: 'income', labelAr: 'المحفظة وسحب الأرباح', labelFr: 'Gains & Versements', icon: Wallet },
+    { id: 'profile', labelAr: 'الملف المهني وإعداد المهارات', labelFr: 'Profil & Compétences', icon: Sliders }
+  ];
+
+  const activeSidebarItem = sidebarItems.find(item => item.id === activeTab);
+  const isVerified = !!myProfile?.isVerifiedTasker;
+  const roomsListLength = chatRooms.length;
+
   return (
-    <div className="min-h-screen bg-slate-50 w-full flex flex-col font-sans text-slate-800" dir={isRTL ? 'rtl' : 'ltr'}>
+    <div className="min-h-screen bg-slate-50 w-full flex font-sans text-slate-800 transition-colors" dir={isRTL ? 'rtl' : 'ltr'}>
       
-      {/* MOTIVATIONAL TOP HERO: WORKER LEADERBOARD METRICS */}
-      <div className="bg-gradient-to-r from-teal-600 via-emerald-650 to-emerald-700 text-white rounded-b-[2.5rem] shadow-xl relative overflow-hidden">
-        <div className="absolute inset-0 bg-grid-white/[0.05] pointer-events-none" />
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-10 flex flex-col md:flex-row items-center justify-between gap-6 relative z-10">
-          
-          <div className="flex items-center gap-5 text-center md:text-right flex-col md:flex-row">
-            {/* User profile initial avatar with status orb */}
-            <div className="relative">
-              <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-3xl bg-white text-emerald-700 flex items-center justify-center font-black text-3xl shadow-xl border-4 border-white/20">
-                {myProfile?.displayName ? myProfile.displayName.charAt(0) : '?'}
-              </div>
-              <button 
-                onClick={handleToggleOnlineStatus}
-                className={`absolute -bottom-1 -right-1 p-1 px-2.5 rounded-full text-[9px] font-bold border-2 border-slate-50 text-white flex items-center gap-1 shadow-sm transition-all cursor-pointer ${
-                  isOnline ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-slate-400 hover:bg-slate-550'
-                }`}
-                title={isRTL ? 'تعديل حالة الاتصال المباشر' : 'Changer statut'}
-              >
-                <Power className="w-3 h-3 shrink-0" />
-                <span>{isOnline ? (isRTL ? 'نشط' : 'En ligne') : (isRTL ? 'مغلق' : 'Hors-ligne')}</span>
-              </button>
+      {/* 1. DESKTOP SIDEBAR NAVIGATION */}
+      <aside className="w-72 bg-slate-900 text-slate-100 flex flex-col h-screen sticky top-0 border-r border-slate-800 z-30 shrink-0 hidden md:flex">
+        {/* Profile Card Header */}
+        <div className="p-6 border-b border-slate-800 space-y-4">
+          <div className="flex items-center gap-3.5 flex-row-reverse">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-sky-400 to-indigo-500 text-white flex items-center justify-center font-black text-xl shadow-lg border border-slate-750 select-none uppercase">
+              {(myProfile?.displayName || user?.displayName || user?.email || 'T').charAt(0)}
             </div>
-
-            <div className="flex flex-col gap-1 md:items-start items-center">
-              <div className="flex flex-wrap items-center gap-2 justify-center">
-                <h2 className="text-xl sm:text-2xl font-black tracking-tight">{myProfile?.displayName || user.displayName || 'حرفي متمرس'}</h2>
-                <span className="bg-white/20 text-white text-[10px] px-2.5 py-0.5 rounded-full font-black border border-white/10 flex items-center gap-1">
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-300" />
-                  <span>{isRTL ? 'حرفي معتمد ومثبت' : 'Prestataire vérifié'}</span>
+            <div className="flex-1 min-w-0 text-right">
+              <h3 className="font-extrabold text-sm text-slate-200 truncate leading-snug">
+                {myProfile?.displayName || user?.displayName || 'Tasker'}
+              </h3>
+              <div className="flex items-center gap-1 mt-0.5 justify-end">
+                <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-500" />
+                <span className="text-xs text-slate-400 font-extrabold">
+                  {myProfile?.rating ? myProfile.rating.toFixed(1) : '5.0'}
                 </span>
-              </div>
-              
-              <p className="text-xs text-teal-100 max-w-md font-medium text-center md:text-right leading-relaxed">
-                {myProfile?.bio || (isRTL ? 'صاحب مهارات متعددة. تنقل بين المهام المفتوحة لتأكيد عروضك وجني أرباح مستمرة.' : 'Artisan professionnel à Rabat. Trouvez des missions à proximité.')}
-              </p>
-
-              {/* Status details line */}
-              <div className="flex items-center gap-3 mt-2 text-xs text-teal-200 font-bold bg-white/10 px-3 py-1.5 rounded-xl">
-                <div className="flex items-center gap-1 text-amber-300">
-                  <Star className="w-3.5 h-3.5 fill-amber-300" />
-                  <span>{myProfile?.rating ? myProfile.rating.toFixed(1) : '5.0'} / 5</span>
-                </div>
-                <span className="opacity-45">|</span>
-                <span className="font-semibold text-emerald-300">
-                  {isRTL ? 'نسبة نجاح 98%' : 'Taux de succès 98%'}
-                </span>
-                <span className="opacity-45">|</span>
-                <span className="text-white">
-                  {editSkills.length} {isRTL ? 'فئات مهارية' : 'compétences'}
-                </span>
+                {isVerified && (
+                  <span className="text-[10px] bg-sky-500/25 text-sky-400 font-bold px-2 py-0.5 rounded ml-1.5 flex items-center gap-0.5">
+                    <ShieldCheck size={10} />
+                    <span>PRO</span>
+                  </span>
+                )}
               </div>
             </div>
           </div>
+        </div>
 
-          {/* Quick toggle to customer dashboard */}
+        {/* Navigation list */}
+        <nav className="flex-1 p-4 space-y-1.5 overflow-y-auto">
+          {sidebarItems.map((item) => {
+            const isActive = activeTab === item.id;
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.id}
+                onClick={() => {
+                  setActiveTab(item.id as any);
+                  setMobileMenuOpen(false);
+                }}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-black transition-colors cursor-pointer select-none text-right flex-row-reverse ${
+                  isActive 
+                    ? 'bg-slate-850 text-sky-400 border border-slate-800 shadow-sm' 
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-850/40'
+                }`}
+              >
+                <Icon size={18} className={isActive ? 'text-sky-400' : 'text-slate-450'} />
+                <span className="flex-1 truncate">{isRTL ? item.labelAr : item.labelFr}</span>
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Sidebar Footer */}
+        <div className="p-4 border-t border-slate-800 space-y-4">
+          <div className="flex items-center justify-between bg-slate-850 p-2.5 rounded-xl border border-slate-800 flex-row-reverse">
+            <span className="text-[10px] text-slate-400 font-black">{isRTL ? 'متاح لتلقي العروض' : 'Disponible'}</span>
+            <button
+              onClick={handleToggleOnlineStatus}
+              className={`p-1 px-3 rounded-md text-[10px] font-bold border flex items-center gap-1 cursor-pointer transition-colors ${
+                isOnline ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-slate-800 text-slate-400 border-slate-700'
+              }`}
+            >
+              <Power className="w-3 h-3" />
+              <span>{isOnline ? (isRTL ? 'نشط' : 'Oui') : (isRTL ? 'مغلق' : 'Non')}</span>
+            </button>
+          </div>
+
           {onToggleToClient && (
             <button
               onClick={onToggleToClient}
-              className="bg-white hover:bg-slate-50 text-emerald-800 font-extrabold text-xs sm:text-xs px-5 py-3.5 rounded-2xl transition-all cursor-pointer shadow-md shadow-emerald-900/10 flex items-center gap-2"
+              className="w-full py-3 bg-slate-800 hover:bg-slate-750 text-slate-300 border border-slate-800 font-semibold text-xs rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2"
             >
-              <Users className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>{isRTL ? 'التبديل إلى لوحة الزبون (طالب الخدمة)' : 'Mode Client (Demander Services)'}</span>
+              <Users className="w-4 h-4 text-sky-404 shrink-0" />
+              <span>{isRTL ? 'التبديل إلى لوحة الزبون' : 'Espace Client'}</span>
             </button>
           )}
-
         </div>
-      </div>
+      </aside>
 
-      {/* WORKER DASHBOARD SUB-NAVIGATION TABS */}
-      <div className="bg-white border-b border-gray-200 sticky top-0 z-20 shadow-xs">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between">
-            <nav className="flex overflow-x-auto py-1 scrollbar-none gap-2 w-full md:w-auto" id="worker-navbar-tabs">
-              {[
-                { id: 'income', labelAr: 'الأرباح والمحفظة والتحويل', labelFr: 'Mes Revenus', icon: Wallet },
-                { id: 'jobs', labelAr: 'مهمات الرباط وخريطة الأحياء', labelFr: 'Explorer les Missions', icon: Map },
-                { id: 'assigned', labelAr: 'مهامي قيد الإنجاز والأرشيف', labelFr: 'Tâches assignées', icon: CheckCircle2 },
-                { id: 'chats', labelAr: 'مفاوضات ورسائل العملاء', labelFr: 'Discussions clients', icon: MessageSquare },
-                { id: 'profile', labelAr: 'الملف المهني وإعداد المهارات', labelFr: 'Profil & Compétences', icon: Sliders }
-              ].map((tab) => {
-                const isActive = activeTab === tab.id;
-                return (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id as any)}
-                    className={`flex items-center gap-2 py-4 px-4.5 text-xs sm:text-sm font-black transition-all cursor-pointer border-b-4 select-none whitespace-nowrap ${
-                      isActive 
-                        ? 'border-emerald-600 text-emerald-700 font-extrabold' 
-                        : 'border-transparent text-gray-400 hover:text-gray-600'
-                    }`}
-                  >
-                    <tab.icon className={`w-4.5 h-4.5 shrink-0 ${isActive ? 'text-emerald-600' : 'text-gray-400'}`} />
-                    <span>{isRTL ? tab.labelAr : tab.labelFr}</span>
-                  </button>
-                );
-              })}
-            </nav>
-            <div className="hidden md:flex items-center gap-1.5 text-xs font-bold text-gray-400 font-mono">
-              <span className={`w-2.5 h-2.5 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-gray-450'}`} />
-              <span>{isOnline ? (isRTL ? 'متاح للعمل فوراً' : 'Disponible') : (isRTL ? 'غير نشط مؤقتاً' : 'Hors-ligne')}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* MAIN LAYOUT CANVAS */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 w-full flex-1 flex flex-col gap-6">
-
-        {/* 1. INCOME TAB: DETAILED WALLET & PAYOUT SYSTEM */}
-        {activeTab === 'income' && (
-          <div className="flex flex-col gap-6 animate-fade-in" id="worker-tab-income">
-            
-            {/* Analytics Stats Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              
-              {/* Wallet Summary Card */}
-              <div className="bg-gradient-to-br from-emerald-600 to-teal-700 text-white p-6 rounded-3xl shadow-md relative overflow-hidden">
-                <div className="absolute right-0 bottom-0 translate-x-4 translate-y-4 opacity-15">
-                  <Wallet className="w-40 h-40" />
-                </div>
-                <div className="flex justify-between items-start">
-                  <div className="flex flex-col">
-                    <span className="text-[10px] text-emerald-100 font-black tracking-wider uppercase">{isRTL ? 'الرصيد المتاح للسحب البنكي' : 'Solde disponible'}</span>
-                    <span className="text-3xl font-black mt-1.5 tracking-tight">{totalEarnedAmount} DH</span>
-                  </div>
-                  <div className="p-2.5 bg-white/10 rounded-xl">
-                    <Banknote className="w-6 h-6 text-emerald-300" />
-                  </div>
-                </div>
-                <div className="mt-8 pt-3 border-t border-white/10 text-xs font-medium text-emerald-100 flex items-center gap-1.5">
-                  <Check className="w-4 h-4 text-emerald-300" />
-                  <span>{isRTL ? 'أموال مضمونة ومكتسبة بالكامل' : 'Fonds sécurisés prêts au transfert'}</span>
-                </div>
+      {/* 2. MOBILE OVERLAY DRAWER */}
+      <AnimatePresence>
+        {mobileMenuOpen && (
+          <>
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 0.5 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setMobileMenuOpen(false)}
+              className="fixed inset-0 bg-slate-900 z-40 md:hidden"
+            />
+            <motion.aside
+              initial={{ x: isRTL ? '100%' : '-100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: isRTL ? '100%' : '-100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="fixed top-0 bottom-0 w-72 bg-slate-900 text-slate-105 z-50 flex flex-col md:hidden border-r border-slate-800"
+            >
+              <div className="p-6 border-b border-slate-800 flex items-center justify-between flex-row-reverse animate-fade-in">
+                <span className="font-sans font-black text-sm text-slate-200">Morocco Tasker</span>
+                <button onClick={() => setMobileMenuOpen(false)} className="p-1 px-2.5 bg-slate-800 hover:bg-slate-750 text-slate-300 rounded-md cursor-pointer"><X size={16} /></button>
               </div>
 
-              {/* Pending Escrow Locked */}
-              <div className="bg-white p-6 rounded-3xl border border-gray-150 shadow-xs flex flex-col justify-between">
-                <div className="flex justify-between items-start">
-                  <div className="flex flex-col">
-                    <span className="text-[10px] text-gray-400 font-black uppercase">{isRTL ? 'الضمان المالي المعلق (قيد الإنجاز)' : 'En attente sur Escrow'}</span>
-                    <span className="text-2xl font-black text-slate-800 mt-1">{pendingEscrowAmount} DH</span>
-                  </div>
-                  <div className="p-3 bg-amber-50 text-amber-600 rounded-xl">
-                    <Clock className="w-5 h-5 animate-spin-slow" />
-                  </div>
-                </div>
-                <div className="mt-4 text-xs text-amber-700 bg-amber-50/50 p-2.5 rounded-xl border border-amber-100 font-semibold text-right">
-                  {isRTL 
-                    ? 'هذا الملغ تم تأمينه من العملاء في نظام الضمان البنكي، وسيُحوّل لمحفظتك فور تأكيد المهام.' 
-                    : 'Fonds réservés déposés par les clients.'}
-                </div>
-              </div>
-
-              {/* Verified Reputation Score */}
-              <div className="bg-white p-6 rounded-3xl border border-gray-150 shadow-xs flex flex-col justify-between">
-                <div className="flex justify-between items-start">
-                  <div className="flex flex-col">
-                    <span className="text-[10px] text-gray-400 font-black uppercase">{isRTL ? 'إجمالي المهام الناجحة المكتملة' : 'Missions finalisées'}</span>
-                    <span className="text-2xl font-black text-slate-800 mt-1">{completedTasks.length} {isRTL ? 'مهمة' : 'jobs'}</span>
-                  </div>
-                  <div className="p-3 bg-blue-50 text-blue-600 rounded-xl">
-                    <Award className="w-5 h-5" />
-                  </div>
-                </div>
-                <div className="mt-4 flex items-center justify-between">
-                  <div className="flex items-center gap-1 text-xs text-slate-500 font-bold">
-                    <span>{myReviews.length} {isRTL ? 'تقييمات موثقة' : 'avis certifiés'}</span>
-                  </div>
-                  <div className="flex items-center gap-1 text-xs text-amber-500 font-extrabold bg-amber-50 px-2 py-1 rounded-md">
-                    <Star className="w-3 h-3 fill-amber-500 text-amber-500 shrink-0" />
-                    <span>{myProfile?.rating ? myProfile.rating.toFixed(1) : '5.0'}</span>
-                  </div>
-                </div>
-              </div>
-
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-
-              {/* Payout & Withdrawal Panel */}
-              <div className="lg:col-span-7 bg-white p-6 rounded-3xl border border-gray-200 shadow-xs flex flex-col justify-between relative">
-                
-                <div className="flex items-center justify-between border-b border-gray-100 pb-3 mb-4">
-                  <div className="flex items-center gap-2">
-                    <CreditCard className="w-5 h-5 text-emerald-500" />
-                    <h3 className="text-sm font-black text-slate-800">{isRTL ? 'تحويل الأرباح لحسابك البنكي المغربي' : 'Retirer mes Gains Vers ma Banque'}</h3>
-                  </div>
-                  <span className="text-[9px] bg-emerald-50 text-emerald-600 font-black px-2 py-0.5 rounded uppercase">
-                    RIB Direct
-                  </span>
-                </div>
-
-                <AnimatePresence>
-                  {withdrawSuccess && (
-                    <motion.div 
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      exit={{ opacity: 0, height: 0 }}
-                      className="bg-emerald-50 text-emerald-800 border border-emerald-200 p-4 rounded-xl text-xs font-bold flex items-center gap-2 mb-4 text-right"
-                    >
-                      <Check className="w-5 h-5 text-emerald-500 shrink-0" />
-                      <span>{isRTL ? 'بنجاح! تم تسجيل طلب سحب الأرباح وسيتم مراجعته وإرساله لحسابك البنكي خلال 24 ساعة كحد أقصى.' : 'Demande formulée ! Paiement en traitement.'}</span>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
-                <form onSubmit={handleWithdrawFunds} className="flex flex-col gap-3.5">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                    
-                    <div className="flex flex-col gap-1.5 text-right">
-                      <label className="text-[10px] font-bold text-gray-400">{isRTL ? 'قيمة مبلغ السحب بالدرهم المغريي' : 'Montant à retirer'}</label>
-                      <input 
-                        type="number"
-                        value={withdrawalAmount}
-                        onChange={(e) => setWithdrawalAmount(Number(e.target.value))}
-                        min={100}
-                        max={totalEarnedAmount || 1000}
-                        className="px-3 py-2.5 rounded-xl border border-gray-200 text-xs font-black leading-none focus:outline-none focus:border-emerald-500"
-                        placeholder="Ex: 500 DH"
-                      />
-                    </div>
-
-                    <div className="flex flex-col gap-1.5 text-right">
-                      <label className="text-[10px] font-bold text-gray-400">{isRTL ? 'اختر مؤسستك البنكية بالمغرب' : 'Votre Banque au Maroc'}</label>
-                      <select 
-                        value={selectedBank}
-                        onChange={(e) => setSelectedBank(e.target.value)}
-                        className="px-3 py-2.5 rounded-xl border border-gray-200 text-xs font-bold focus:outline-none focus:border-emerald-500 bg-white"
-                      >
-                        {MAROC_BANKS.map(b => (
-                          <option key={b.id} value={b.id}>{isRTL ? b.nameAr : b.nameFr}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                  </div>
-
-                  <div className="flex flex-col gap-1.5 text-right">
-                    <label className="text-[10px] font-bold text-gray-400">{isRTL ? 'أدخل رقم الحساب البنكي (RIB - 24 خانة)' : 'Code RIB Marocain (24 chiffres)'}</label>
-                    <input 
-                      type="text"
-                      maxLength={24}
-                      value={ribInput}
-                      onChange={(e) => setRibInput(e.target.value.replace(/\D/g, ''))}
-                      placeholder="Ex: 123456789012345678901234"
-                      className="px-3 py-2.5 rounded-xl border border-gray-200 text-xs font-mono font-bold leading-none tracking-widest text-center focus:outline-none focus:border-emerald-500"
-                      required
-                    />
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={withdrawingInProgress || totalEarnedAmount <= 0}
-                    className="w-full mt-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs sm:text-sm py-3.5 px-5 rounded-2xl cursor-pointer active:scale-98 transition-all flex items-center justify-center gap-1.5 shadow-sm disabled:opacity-50"
-                  >
-                    {withdrawingInProgress ? (
-                      <span>{isRTL ? 'جاري توثيق طلب السحب...' : 'Traitement en cours...'}</span>
-                    ) : (
-                      <>
-                        <Banknote className="w-4 h-4 text-white" />
-                        <span>{isRTL ? 'سحب فوري للمستحقات البنكية' : 'Débloquer et virer mes fonds'}</span>
-                      </>
-                    )}
-                  </button>
-
-                </form>
-
-              </div>
-
-              {/* Withdrawal History Logging List */}
-              <div className="lg:col-span-5 bg-white p-5 rounded-3xl border border-gray-200 flex flex-col justify-between shadow-xs">
-                
-                <div className="flex items-center justify-between border-b border-gray-100 pb-3 mb-3">
-                  <div className="flex items-center gap-2">
-                    <Calendar className="w-5 h-5 text-emerald-500" />
-                    <h4 className="text-xs font-black text-slate-800 uppercase">{isRTL ? 'سجل السحوبات الماضية الحية' : 'Suivi des Transferts'}</h4>
-                  </div>
-                  <span className="text-[9px] bg-slate-100 text-slate-600 font-extrabold px-2 py-0.5 rounded">
-                    {withdrawalHistory.length} TRANSACTIONS
-                  </span>
-                </div>
-
-                <div className="flex flex-col gap-2 max-h-[160px] overflow-y-auto">
-                  {withdrawalHistory.length === 0 ? (
-                    <div className="py-8 text-center text-[10px] text-gray-400 font-semibold leading-relaxed">
-                      {isRTL ? 'لا توجد أي سحوبات سابقة مسجلة بمحفظتك.' : 'Aucun mouvement de retrait encore enregistré.'}
-                    </div>
-                  ) : (
-                    withdrawalHistory.map((item) => (
-                      <div key={item.id} className="p-3 rounded-xl border border-gray-150 flex items-center justify-between hover:bg-slate-50 transition-colors">
-                        <div className="flex flex-col items-start gap-0.5">
-                          <span className={`text-[9px] px-1.5 py-0.5 rounded font-black uppercase ${
-                            item.status === 'completed' ? 'bg-emerald-50 text-emerald-700' :
-                            item.status === 'failed' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'
-                          }`}>
-                            {item.status}
-                          </span>
-                        </div>
-                        <div className="flex flex-col text-right">
-                          <span className="text-xs font-black text-slate-800">{item.amount} DH</span>
-                          <span className="text-[9px] text-gray-450 font-bold uppercase">{item.bankName}</span>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-
-              </div>
-
-            </div>
-
-          </div>
-        )}
-
-        {/* 2. EXPLORE JOBS TAB: BROWSE JOBS WITH INTERACTIVE SVG MAP */}
-        {activeTab === 'jobs' && (
-          <div className="flex flex-col gap-6 animate-fade-in" id="worker-tab-jobs">
-            
-            {/* Header filters banner */}
-            <div className="bg-white p-5 rounded-3xl border border-gray-200 shadow-xs flex flex-col md:flex-row items-center justify-between gap-4">
-              
-              {/* Search bar input value */}
-              <div className="w-full md:w-72 relative">
-                <Search className="w-4.5 h-4.5 text-gray-400 absolute right-3 top-1/2 -translate-y-1/2" />
-                <input 
-                  type="text"
-                  value={jobSearchQuery}
-                  onChange={(e) => setJobSearchQuery(e.target.value)}
-                  placeholder={isRTL ? 'ابحث بالكلمات الدلالية هنا (مثل: غسيل، صباغة)...' : 'Rechercher une tâche...'}
-                  className="w-full pl-3 pr-10 py-2 rounded-xl border border-gray-200 text-xs font-semibold focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-
-              {/* Filters dropdown parameters */}
-              <div className="flex flex-wrap items-center gap-3 w-full md:w-auto justify-end">
-                
-                {/* Neighborhood switch dropdown */}
-                <select
-                  value={selectedNeighborhood}
-                  onChange={(e) => setSelectedNeighborhood(e.target.value)}
-                  className="px-3 py-2 border border-gray-200 rounded-xl text-xs font-extrabold bg-slate-50 focus:outline-none text-right"
-                >
-                  <option value="all">{isRTL ? 'كل أحياء الرباط' : 'Rabat (Tous)'}</option>
-                  {RABAT_NEIGHBORHOODS.map(n => (
-                    <option key={n.id} value={n.id}>{isRTL ? n.ar : n.fr}</option>
-                  ))}
-                </select>
-
-                {/* Category switch filter */}
-                <select
-                  value={selectedCategory}
-                  onChange={(e) => setSelectedCategory(e.target.value)}
-                  className="px-3 py-2 border border-gray-200 rounded-xl text-xs font-extrabold bg-slate-50 focus:outline-none text-right"
-                >
-                  <option value="all">{isRTL ? 'كل تخصصات الخدمات' : 'Spécialités (Toutes)'}</option>
-                  {SERVICE_CATEGORIES.map(c => (
-                    <option key={c.id} value={c.id}>{isRTL ? c.ar : c.fr}</option>
-                  ))}
-                </select>
-
-                {/* Toggle Map Show status */}
-                <button
-                  type="button"
-                  onClick={() => setShowMap(!showMap)}
-                  className={`p-2 px-3.5 transition-all text-xs font-bold rounded-xl border cursor-pointer flex items-center gap-1 bg-white hover:bg-slate-50 ${
-                    showMap ? 'text-emerald-700 border-emerald-350 bg-emerald-50' : 'text-slate-550 border-gray-200'
-                  }`}
-                >
-                  <Map className="w-4 h-4" />
-                  <span>{showMap ? (isRTL ? 'إخفاء الخريطة' : 'Masquer la carte') : (isRTL ? 'عرض الخريطة' : 'Afficher la carte')}</span>
-                </button>
-
-              </div>
-            </div>
-
-            {/* Split layout: SVG Interactive Map and Task Listings */}
-            <div className={`grid grid-cols-1 ${showMap ? 'lg:grid-cols-12' : ''} gap-6`}>
-              
-              {/* Maps wrapper section if active */}
-              {showMap && (
-                <div className="lg:col-span-5 bg-white p-5 rounded-3xl border border-gray-200 shadow-xs flex flex-col gap-4">
-                  <div className="border-b border-gray-100 pb-2.5 flex items-center justify-between flex-row-reverse">
-                    <h4 className="text-xs font-black text-slate-800 flex items-center gap-1.5">
-                      <Map className="w-4.5 h-4.5 text-emerald-500" />
-                      <span>{isRTL ? 'حدد حي بالرباط لاستكشاف مهامه المتاحة' : 'Quartiers actifs à Rabat'}</span>
-                    </h4>
-                    {selectedNeighborhood !== 'all' && (
-                      <button
-                        onClick={() => setSelectedNeighborhood('all')}
-                        className="text-[9px] bg-slate-100 hover:bg-slate-150 text-slate-650 px-2.5 py-1 rounded font-extrabold"
-                      >
-                        {isRTL ? 'عرض الكل' : 'Afficher tout'}
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="h-[320px] rounded-2xl overflow-hidden relative border border-gray-150 flex items-center justify-center bg-slate-50/50">
-                    <RabatMap 
-                      tasks={openTasks}
-                      selectedNeighborhood={selectedNeighborhood}
-                      onSelectNeighborhood={setSelectedNeighborhood}
-                      lang={lang}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Tasks List Listings representation */}
-              <div className={`${showMap ? 'lg:col-span-7' : 'w-full'} flex flex-col gap-4`}>
-                
-                <h4 className="text-xs font-black text-slate-500 uppercase flex items-center gap-1.5 justify-end">
-                  <span>{isRTL ? 'طلبات الصنعة والعمل المطروحة' : 'Missions locales dénichées'} ({filteredAvailableTasks.length})</span>
-                  <Bookmark className="w-4.5 h-4.5 text-gray-400" />
-                </h4>
-
-                <div className="flex flex-col gap-3.5 max-h-[500px] overflow-y-auto pr-1">
-                  {loadingTasks ? (
-                    <div className="bg-white p-8 rounded-2xl border text-center text-xs font-medium text-gray-400 animate-pulse">
-                      {isRTL ? 'جاري فرز المهام المتوفرة من خوادم العاصمة الرباط...' : 'Tri des opportunités disponibles...'}
-                    </div>
-                  ) : filteredAvailableTasks.length === 0 ? (
-                    <div className="bg-white p-12 text-center rounded-2xl border flex flex-col items-center gap-2">
-                      <AlertCircle className="w-8 h-8 text-slate-300" />
-                      <p className="text-xs font-bold text-gray-400 max-w-sm leading-relaxed">
-                        {isRTL ? 'لم نعثر على مهام مفتوحة تطابق فلاتر البحث الحالية بالرباط. يرجى تعديل خيارات التصفية.' : 'Aucun travail ne correspond à votre recherche actuelle.'}
-                      </p>
-                    </div>
-                  ) : (
-                    filteredAvailableTasks.map((task) => {
-                      const spec = getCategoryTheme(task.category);
-                      const myBid = myOffers[task.id];
-                      return (
-                        <div 
-                          key={task.id} 
-                          className={`bg-white p-4.5 rounded-2xl border transition-all flex flex-col justify-between gap-3 shadow-xs hover:border-emerald-350 relative ${
-                            myBid ? 'border-indigo-150 bg-indigo-50/10' : 'border-gray-200'
-                          }`}
-                        >
-                          
-                          {/* Top row category details badge */}
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-black text-emerald-600 font-mono tracking-tight">{task.budget} DH</span>
-                            <div className="flex items-center gap-2">
-                              <span className={`text-[9px] px-2.5 py-1 rounded-full font-black border uppercase tracking-wider ${spec.color}`}>
-                                {spec.name}
-                              </span>
-                              <span className="text-[10px] text-gray-450 font-bold flex items-center gap-1">
-                                <MapPin className="w-3.5 h-3.5 text-emerald-500" />
-                                <span>{task.location}</span>
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* Task Description message */}
-                          <div className="text-right">
-                            <h3 className="text-sm font-black text-slate-900 leading-snug">{task.title}</h3>
-                            <p className="text-xs text-gray-400 font-medium line-clamp-2 mt-1.5 leading-normal">{task.description}</p>
-                          </div>
-
-                          {/* Action Button & Bid state tracking */}
-                          <div className="flex items-center justify-between border-t border-gray-100 pt-3 mt-1">
-                            
-                            <div className="flex items-center gap-1.5 text-[9px] text-slate-400 font-bold uppercase bg-slate-50 px-2 py-1 rounded">
-                              <Clock className="w-3.5 h-3.5 text-slate-450" />
-                              <span>{isRTL ? 'الموعد المخطط:' : 'Échéance:'} {task.dueDate}</span>
-                            </div>
-
-                            {myBid ? (
-                              <button
-                                onClick={() => {
-                                  setActiveRoom({
-                                    id: `${task.id}_${user.uid}`,
-                                    taskId: task.id,
-                                    taskTitle: task.title,
-                                    otherPartyId: task.posterId,
-                                    otherPartyName: task.posterName
-                                  });
-                                  setActiveTab('chats');
-                                }}
-                                className="px-4 py-2 border border-indigo-200 bg-indigo-50 text-indigo-700 font-bold text-xs rounded-xl hover:bg-indigo-100 transition-colors flex items-center gap-1.5 hover:underline cursor-pointer"
-                              >
-                                <MessageSquare className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                                <span>{isRTL ? `تفاوض الآن (مبلغك: ${myBid.amount} DH)` : `Négocier (${myBid.amount} MAD)`}</span>
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => {
-                                  setFocusedTask(task);
-                                  setPitchAmount(task.budget);
-                                  setPitchMessage('');
-                                }}
-                                className="px-4 py-2 bg-emerald-550 hover:bg-emerald-600 text-white font-black text-xs rounded-xl cursor-pointer active:scale-95 transition-all flex items-center gap-1.5 shadow-sm"
-                              >
-                                <Plus className="w-4 h-4" />
-                                <span>{isRTL ? 'تقديم عرض فني وسعر' : 'Soumettre un tarif'}</span>
-                              </button>
-                            )}
-
-                          </div>
-
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-
-              </div>
-
-            </div>
-
-          </div>
-        )}
-
-        {/* 3. ASSIGNED AND ARCHIVED JOBS */}
-        {activeTab === 'assigned' && (
-          <div className="flex flex-col gap-6 animate-fade-in" id="worker-tab-assigned">
-            
-            {/* Active matched assignments list */}
-            <div className="bg-white p-5 rounded-3xl border border-gray-150 shadow-xs">
-              <div className="border-b border-gray-100 pb-3 mb-4 text-right">
-                <h3 className="text-sm font-black text-slate-800 flex items-center gap-1.5 justify-end">
-                  <Clock className="w-5 h-5 text-emerald-500 animate-pulse" />
-                  <span>{isRTL ? 'مهمات نشطة قيد الإنجاز (تم اختيارك)' : 'Missions actives en cours d’exécution'}</span>
-                </h3>
-                <p className="text-xs text-gray-400 font-medium mt-1">
-                  {isRTL ? 'هذه المهام مسندة إليك رسمياً، وقد قام أصحابها بتمويل الضمان المالي بالكامل. أنجز العمل وحل مشكلتهم!' : 'Les fonds de ces tâches sont garantis sur le compte Escrow.'}
-                </p>
-              </div>
-
-              <div className="flex flex-col gap-4">
-                {loadingAssigned ? (
-                  <div className="p-4 text-center text-xs text-gray-400 font-medium animate-pulse">{isRTL ? 'جاري استيراد العمليات النشطة...' : 'Chargement...'}</div>
-                ) : assignedTasks.length === 0 ? (
-                  <div className="p-8 text-center text-[11px] text-gray-400 font-bold leading-relaxed">
-                    {isRTL ? 'لا توجد أي مهام مسندة إليك قيد التنفيذ حالياً. قم بتقديم عروض مقنعة في قائمة تصفح المهام!' : 'Aucun travail en cours. Prospectez des offres !'}
-                  </div>
-                ) : (
-                  assignedTasks.map((item) => (
-                    <div key={item.id} className="p-4 rounded-2xl border border-emerald-200 bg-emerald-50/5 flex flex-col sm:flex-row items-center justify-between gap-4">
-                      
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => {
-                            setActiveRoom({
-                              id: `${item.id}_${user.uid}`,
-                              taskId: item.id,
-                              taskTitle: item.title,
-                              otherPartyId: item.posterId,
-                              otherPartyName: item.posterName
-                            });
-                            setActiveTab('chats');
-                          }}
-                          className="px-3.5 py-2.5 bg-blue-50 text-blue-700 hover:bg-blue-100 font-black text-xs rounded-xl cursor-pointer transition-colors flex items-center gap-1.5 justify-center"
-                        >
-                          <MessageSquare className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                          <span>{isRTL ? 'دردشة مع العميل' : 'Chat avec le client'}</span>
-                        </button>
-                        <span className="text-xs font-black text-emerald-600 bg-emerald-50 px-2.5 py-1.5 rounded-xl border border-emerald-200">
-                          {item.budget} DH
-                        </span>
-                      </div>
-
-                      <div className="text-center sm:text-right">
-                        <h4 className="text-sm font-black text-slate-930">{item.title}</h4>
-                        <div className="flex items-center gap-2 mt-1 sm:justify-end justify-center text-[10px] text-gray-450 font-bold">
-                          <span>{item.posterName}</span>
-                          <span className="opacity-40">|</span>
-                          <span className="text-emerald-600 flex items-center gap-1">
-                            <ShieldCheck className="w-3.5 h-3.5 inline text-emerald-500" />
-                            <span>{isRTL ? 'رصيد حجز الضمان مؤمن' : 'Escrow approvisionné'}</span>
-                          </span>
-                        </div>
-                      </div>
-
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-
-            {/* Past completed jobs history */}
-            <div className="bg-white p-5 rounded-3xl border border-gray-150 shadow-xs">
-              <div className="border-b border-gray-100 pb-3 mb-4 text-right">
-                <h3 className="text-sm font-black text-slate-800 flex items-center gap-1.5 justify-end">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-                  <span>{isRTL ? 'قائمة وتاريخ المهام المكتملة السابقة' : 'Mon Historique des tâches clôturées'}</span>
-                </h3>
-              </div>
-
-              <div className="flex flex-col gap-3">
-                {loadingCompleted ? (
-                  <div className="p-4 text-center text-xs text-gray-400 font-medium animate-pulse">Loading...</div>
-                ) : completedTasks.length === 0 ? (
-                  <div className="p-8 text-center text-[11px] text-gray-400 font-bold leading-relaxed">
-                    {isRTL ? 'لا توجد مهام منتهية مغلقة في أرشيفك حتى الآن.' : 'Aucun travail archivé.'}
-                  </div>
-                ) : (
-                  completedTasks.map((item) => {
-                    // Look for review left by client for this task
-                    const matchedReview = myReviews.find(r => r.taskId === item.id);
-                    return (
-                      <div key={item.id} className="p-4.5 rounded-2xl border border-gray-200 flex flex-col justify-between gap-3 text-right">
-                        
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-black text-slate-450 uppercase">{item.dueDate}</span>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-black text-slate-900">{item.budget} DH</span>
-                            <span className="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-md font-black">
-                              {isRTL ? 'مسلم ومحرر' : 'Payé'}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div>
-                          <h4 className="text-sm font-black text-slate-900">{item.title}</h4>
-                          <p className="text-[10px] text-gray-400 mt-0.5 font-bold">{isRTL ? 'صاحب الخدمة:' : 'Payé par:'} {item.posterName}</p>
-                        </div>
-
-                        {/* Customer feedback display if available */}
-                        {matchedReview ? (
-                          <div className="p-3 bg-amber-50/40 rounded-xl border border-amber-100 mt-1">
-                            <div className="flex items-center justify-between flex-row-reverse">
-                              <span className="text-[9px] text-gray-450 font-bold">{matchedReview.reviewerName}</span>
-                              <div className="flex items-center gap-1 text-xs text-amber-500 font-black">
-                                <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-500 shrink-0" />
-                                <span>{matchedReview.rating}</span>
-                              </div>
-                            </div>
-                            <p className="text-[11px] text-slate-650 font-semibold mt-1.5 leading-relaxed">"{matchedReview.comment}"</p>
-                          </div>
-                        ) : (
-                          <div className="text-[10px] text-gray-400 font-bold mt-1">
-                            {isRTL ? 'بانتظار تقييم العميل...' : 'Évaluation client en attente.'}
-                          </div>
-                        )}
-
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-
-          </div>
-        )}
-
-        {/* 4. CHAT MESSAGES WITH CLIENTS */}
-        {activeTab === 'chats' && (
-          <div className="flex-1 bg-white border border-gray-200 rounded-3xl overflow-hidden shadow-sm flex flex-col md:flex-row min-h-[550px] animate-fade-in" id="worker-tab-chats">
-            
-            {/* Chats Sidebar */}
-            <div className="w-full md:w-80 border-r md:border-r-0 md:border-l border-gray-200 shrink-0 bg-slate-50 flex flex-col">
-              <div className="p-4 border-b border-gray-200 bg-emerald-50/10">
-                <h4 className="text-xs font-black text-slate-800 flex items-center gap-2 justify-end">
-                  <MessageCircle className="w-4.5 h-4.5 text-emerald-600 shrink-0" />
-                  <span>{isRTL ? 'المحادثات والنقاشات النشطة مع أصحاب الطلب' : 'Messageries Actives Client'}</span>
-                </h4>
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-2.5 flex flex-col gap-1.5 max-h-[250px] md:max-h-[500px]">
-                {loadingChats ? (
-                  <div className="p-4 text-center text-[10px] text-gray-400 animate-pulse">{isRTL ? 'مزامنة المحادثات الجارية...' : 'Chargement...'}</div>
-                ) : chatRooms.length === 0 ? (
-                  <div className="py-12 p-4 text-center text-[10px] text-gray-400 font-bold leading-relaxed">
-                    {isRTL 
-                      ? 'لا توجد محادثات نشطة بعد. الترسيم يتم فور وضعك لعرض أسعار فني على أحد المهام.' 
-                      : 'Aucun message de négociation. Postez des propositions de devis.'}
-                  </div>
-                ) : (
-                  chatRooms.map((room) => {
-                    const isActive = activeRoom?.id === room.id;
-                    return (
-                      <button
-                        type="button"
-                        key={room.id}
-                        onClick={() => setActiveRoom(room)}
-                        className={`w-full p-4 rounded-xl text-right transition-all flex flex-col gap-1 cursor-pointer select-none ${
-                          isActive 
-                            ? 'bg-emerald-600 text-white shadow-md shadow-emerald-500/10' 
-                            : 'border border-transparent bg-white shadow-xs hover:bg-emerald-50/40'
-                        }`}
-                      >
-                        <span className={`text-[10px] font-black line-clamp-1 ${isActive ? 'text-emerald-100' : 'text-emerald-600'}`}>{room.taskTitle}</span>
-                        <span className={`text-xs font-extrabold flex items-center gap-1.5 justify-end ${isActive ? 'text-white' : 'text-slate-800'}`}>
-                          <span>{room.otherPartyName}</span>
-                          <span className={`w-2 h-2 rounded-full ${isActive ? 'bg-white' : 'bg-emerald-500 animate-pulse'}`} />
-                        </span>
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-
-            {/* Message Pane */}
-            <div className="flex-1 flex flex-col bg-white">
-              {activeRoom ? (
-                <>
-                  <div className="p-4.5 border-b border-gray-100 flex items-center justify-between flex-row bg-slate-50/40">
-                    <div className="flex items-center gap-2">
-                      <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                      <span className="text-[10px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full font-black uppercase">
-                        {isRTL ? 'مفاوضات أسعار' : 'Négociation'}
-                      </span>
-                    </div>
-
-                    <div className="flex flex-col text-right">
-                      <span className="text-xs font-black text-slate-900">{activeRoom.otherPartyName}</span>
-                      <span className="text-[10px] text-slate-400 font-bold">{activeRoom.taskTitle}</span>
-                    </div>
-                  </div>
-
-                  <div className="flex-1 p-4 overflow-y-auto space-y-4 flex flex-col justify-start max-h-[380px]">
-                    {messages.length === 0 ? (
-                      <div className="py-16 text-center text-[10px] text-gray-450 leading-relaxed font-bold">
-                        {isRTL 
-                          ? 'تفاوض بذكاء مع العميل! أثبت قدراتك المهنية وأرسل له تفاصيل خبرتك وسرعة وصولك.' 
-                          : 'Proposez des détails supplémentaires, des images, etc.'}
-                      </div>
-                    ) : (
-                      messages.map((m) => {
-                        const isMe = m.senderId === user.uid;
-                        return (
-                          <div 
-                            key={m.id}
-                            className={`flex flex-col max-w-[80%] gap-1 ${isMe ? 'self-end items-end' : 'self-start items-start'}`}
-                          >
-                            <span className="text-[8px] text-gray-400 font-black px-1 leading-none">{m.senderName}</span>
-                            <div className={`p-3 rounded-2xl text-xs font-semibold leading-relaxed ${
-                              isMe 
-                                ? 'bg-emerald-600 text-white rounded-tr-none' 
-                                : 'bg-slate-100 text-gray-800 rounded-tl-none border border-slate-150'
-                            }`}>
-                              {m.text}
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                    <div ref={chatEndRef} />
-                  </div>
-
-                  <form onSubmit={handleSendChatMessage} className="p-3 border-t border-gray-100 bg-slate-50 flex gap-2">
-                    <input
-                      type="text"
-                      value={newMessageText}
-                      onChange={(e) => setNewMessageText(e.target.value)}
-                      placeholder={isRTL ? 'اكتب رسالتك وسؤالك للعميل بوضوح هنا...' : 'Saisir votre message...'}
-                      className="flex-1 min-w-0 px-4 py-2.5 rounded-xl border border-gray-200 text-xs font-semibold focus:outline-none focus:border-emerald-500 bg-white"
-                      required
-                    />
+              <nav className="flex-1 p-4 space-y-1.5 overflow-y-auto">
+                {sidebarItems.map((item) => {
+                  const isActive = activeTab === item.id;
+                  const Icon = item.icon;
+                  return (
                     <button
-                      type="submit"
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white p-3.5 rounded-xl cursor-pointer transition-colors shrink-0"
+                      key={item.id}
+                      onClick={() => {
+                        setActiveTab(item.id as any);
+                        setMobileMenuOpen(false);
+                      }}
+                      className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-black transition-colors cursor-pointer select-none text-right flex-row-reverse ${
+                        isActive 
+                          ? 'bg-slate-850 text-sky-404 border border-slate-650/40 shadow-sm' 
+                          : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                      }`}
                     >
-                      <Send className="w-4 h-4" />
+                      <Icon size={18} className={isActive ? 'text-sky-404' : 'text-slate-400'} />
+                      <span className="flex-1 truncate">{isRTL ? item.labelAr : item.labelFr}</span>
                     </button>
-                  </form>
-                </>
-              ) : (
-                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center gap-3">
-                  <MessageCircle className="w-12 h-12 text-slate-300 stroke-1.5" />
-                  <p className="text-xs font-bold text-gray-450 max-w-sm leading-relaxed">
-                    {isRTL 
-                      ? 'يرجى اختيار أحد غرف الدردشة النشطة للبدء الفوري في نقاش السعر مع العميل.' 
-                      : 'Sélectionnez un fil de discussion pour entamer les négociations directes.'}
+                  );
+                })}
+              </nav>
+
+              <div className="p-4 border-t border-slate-800 space-y-4">
+                {onToggleToClient && (
+                  <button
+                    onClick={onToggleToClient}
+                    className="w-full py-3 bg-slate-800 text-slate-300 border border-slate-700 font-semibold text-xs rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    <Users className="w-4 h-4 text-sky-405 shrink-0" />
+                    <span>{isRTL ? 'التبديل لوحة الزبون' : 'Espace Client'}</span>
+                  </button>
+                )}
+              </div>
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* 3. MAIN WORKSPACE VIEW FRAME */}
+      <div className="flex-1 min-w-0 flex flex-col min-h-screen overflow-y-auto bg-slate-50">
+        
+        {/* TOP BAR HEADER */}
+        <header className="bg-white border-b border-gray-150 h-16 px-6 sticky top-0 z-20 flex items-center justify-between shadow-xs">
+          {/* Mobile hamburger menu toggle */}
+          <div className="flex items-center gap-3.5">
+            <button 
+              onClick={() => setMobileMenuOpen(true)} 
+              className="md:hidden p-2 text-slate-505 hover:text-slate-800 hover:bg-slate-55 rounded-xl cursor-pointer"
+            >
+              <Menu size={20} />
+            </button>
+            <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-sky-50 text-sky-800 rounded-full font-bold text-xs animate-fade-in">
+              <MapPin size={12} className="text-sky-600" />
+              <span>Rabat, {editLocation || (isRTL ? 'أكدال' : 'Agdal')}</span>
+            </div>
+          </div>
+
+          {/* Center tab title display */}
+          <div className="hidden md:flex items-center gap-2">
+            <span className="font-extrabold text-sm text-slate-800 font-sans tracking-tight">
+              {isRTL ? activeSidebarItem?.labelAr : activeSidebarItem?.labelFr}
+            </span>
+          </div>
+
+          {/* Right Actions Block */}
+          <div className="flex items-center gap-3">
+            {user && (user.uid === 'sDCii92rV7fKTvvDgWTQCLKxwJr1' || user.email === 'cryptomourad1992@gmail.com' || myProfile?.role === 'admin' || myProfile?.isSuperAdmin || userProfile?.role === 'admin') && (
+              <button
+                onClick={() => onViewChange?.('admin')}
+                className="bg-purple-650 hover:bg-purple-750 text-white text-[11px] px-3.5 py-2 rounded-xl font-black flex items-center gap-1.5 shadow-md cursor-pointer animate-pulse shrink-0 border border-purple-500 hover:scale-102 active:scale-95 transition-all"
+              >
+                👑 <span>{isRTL ? 'بوابة الإشراف الإدارية ⚡' : 'Portal Admin General ⚡'}</span>
+              </button>
+            )}
+
+            {onToggleToClient && (
+              <button 
+                onClick={onToggleToClient} 
+                className="hidden lg:flex items-center gap-1.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all shadow-xs cursor-pointer"
+              >
+                <Plus size={14} />
+                <span>{isRTL ? 'نشر مهمة جديدة' : 'Créer une tâche'}</span>
+              </button>
+            )}
+
+            <button 
+              onClick={() => setActiveTab('chats')} 
+              className="p-2 text-slate-400 hover:text-slate-655 bg-slate-50 hover:bg-slate-100 rounded-xl relative cursor-pointer"
+            >
+              <MessageCircle size={18} />
+              {roomsListLength > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-emerald-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center animate-pulse">
+                  {roomsListLength}
+                </span>
+              )}
+            </button>
+
+            <button 
+              onClick={onOpenSettings} 
+              className="p-1 rounded-full border border-gray-100 hover:border-gray-200 transition-colors cursor-pointer"
+              aria-label="Settings"
+            >
+              <div className="w-10 h-10 rounded-full bg-slate-100 border border-gray-200 text-slate-700 font-black text-xs flex items-center justify-center uppercase">
+                {(myProfile?.displayName || user?.displayName || user?.email || 'T').charAt(0)}
+              </div>
+            </button>
+          </div>
+        </header>
+
+        {/* MAIN BODY CANVAS CONTENT */}
+        <main className="flex-1 p-4 md:p-8 max-w-7xl w-full mx-auto flex flex-col gap-6">
+
+          {/* A. PREMIUM DASHBOARD VIEW */}
+          {activeTab === 'dashboard' && (
+            <div className="animate-fade-in" id="worker-tab-dashboard">
+              <TaskerDashboard 
+                user={user}
+                userProfile={myProfile}
+                lang={lang}
+                onSelectTask={onSelectTask}
+                onOpenSettings={onOpenSettings}
+                onToggleToClient={onToggleToClient}
+              />
+            </div>
+          )}
+
+          {/* B. INCOME TAB: WALLET & TRANSFERS */}
+          {activeTab === 'income' && (
+            <WorkerDashboardIncomeTab 
+              lang={lang}
+              isRTL={isRTL}
+              completedTasks={completedTasks}
+              assignedTasks={assignedTasks}
+              myReviews={myReviews}
+              myProfile={myProfile}
+              withdrawalHistory={withdrawalHistory}
+              withdrawalAmount={withdrawalAmount}
+              selectedBank={selectedBank}
+              ribInput={ribInput}
+              withdrawSuccess={withdrawSuccess}
+              withdrawingInProgress={withdrawingInProgress}
+              totalEarnedAmount={totalEarnedAmount}
+              pendingEscrowAmount={pendingEscrowAmount}
+              setWithdrawalAmount={setWithdrawalAmount}
+              setSelectedBank={setSelectedBank}
+              setRibInput={setRibInput}
+              handleWithdrawFunds={handleWithdrawFunds}
+            />
+          )}
+
+          {/* C. EXPLORE MAP JOBS TAB */}
+          {activeTab === 'jobs' && (
+            <WorkerDashboardJobsTab 
+              lang={lang}
+              isRTL={isRTL}
+              jobSearchQuery={jobSearchQuery}
+              setJobSearchQuery={setJobSearchQuery}
+              selectedNeighborhood={selectedNeighborhood}
+              setSelectedNeighborhood={setSelectedNeighborhood}
+              selectedCategory={selectedCategory}
+              setSelectedCategory={setSelectedCategory}
+              showMap={showMap}
+              setShowMap={setShowMap}
+              filteredAvailableTasks={filteredAvailableTasks}
+              onSelectTask={onSelectTask}
+              getCategoryTheme={getCategoryTheme}
+              rabatNeighborhoods={RABAT_NEIGHBORHOODS}
+              serviceCategories={SERVICE_CATEGORIES}
+            />
+          )}
+
+          {/* D. ASSIGNED PRESTATIONS TAB */}
+          {activeTab === 'assigned' && (
+            <WorkerDashboardAssignedTab 
+              lang={lang}
+              isRTL={isRTL}
+              loadingAssigned={loadingAssigned}
+              loadingCompleted={loadingCompleted}
+              assignedTasks={assignedTasks}
+              completedTasks={completedTasks}
+              myReviews={myReviews}
+              onSelectTask={onSelectTask}
+            />
+          )}
+
+          {/* E. CHAT DISCUSSIONS TAB */}
+          {activeTab === 'chats' && (
+            <WorkerDashboardChatsTab 
+              lang={lang}
+              isRTL={isRTL}
+              chatRooms={chatRooms}
+              loadingChats={loadingChats}
+              activeRoom={activeRoom}
+              setActiveRoom={setActiveRoom}
+              messages={messages}
+              newMessageText={newMessageText}
+              setNewMessageText={setNewMessageText}
+              handleSendChatMessage={handleSendChatMessage}
+              user={user}
+              chatEndRef={chatEndRef}
+            />
+          )}
+
+          {/* F. PROFILE EDIT & SKILLS MATRIX TAB */}
+          {activeTab === 'profile' && (
+            <WorkerDashboardProfileTab 
+              lang={lang}
+              isRTL={isRTL}
+              editBio={editBio}
+              setEditBio={setEditBio}
+              editLocation={editLocation}
+              setEditLocation={setEditLocation}
+              editMinRate={editMinRate}
+              setEditMinRate={setEditMinRate}
+              editSkills={editSkills}
+              handleToggleSkill={handleToggleSkill}
+              handleUpdateProfile={handleUpdateProfile}
+              profileSuccessAlert={profileSuccessAlert}
+              savingProfile={savingProfile}
+              rabatNeighborhoods={RABAT_NEIGHBORHOODS}
+              serviceCategories={SERVICE_CATEGORIES}
+            />
+          )}
+
+          {/* G. NOTIFICATIONS TAB */}
+          {activeTab === 'notifications' && (
+            <div className="flex flex-col gap-6 animate-fade-in" id="worker-tab-notifications">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b pb-4 border-gray-200/60 text-right gap-4">
+                <div className="flex flex-col gap-0.5">
+                  <h3 className="text-sm font-black text-slate-900">{isRTL ? 'مركز التنبيهات والإشعارات للحرفي' : 'Notifications du Prestataire'}</h3>
+                  <span className="text-[10px] text-gray-450 font-bold">
+                    {isRTL ? 'تابع العروض المقبولة، رسائل العملاء الجديدة والفرص المناسبة لمهاراتك.' : 'Suivez l\'activité de vos offres de prix, messages et alertes de sécurité.'}
+                  </span>
+                </div>
+                {notificationsList.some(n => !n.read) && (
+                  <button
+                    onClick={handleMarkAllAsRead}
+                    className="bg-blue-50 hover:bg-blue-100 text-blue-700 font-extrabold text-xs px-4 py-2 rounded-xl transition-all cursor-pointer self-start sm:self-center"
+                  >
+                    {isRTL ? 'تعيين الكل كمقروء' : 'Tout marquer comme lu'}
+                  </button>
+                )}
+              </div>
+
+              {notificationsList.length === 0 ? (
+                <div className="bg-white p-12 text-center rounded-3xl border border-gray-150 flex flex-col items-center gap-3 justify-center">
+                  <div className="p-4 bg-gray-50 text-gray-300 rounded-2xl">
+                    <Bell className="w-8 h-8" />
+                  </div>
+                  <span className="text-xs font-black text-slate-850">{isRTL ? 'لا توجد تنبيهات جديدة' : 'Aucune notification'}</span>
+                  <p className="text-[10px] text-gray-400 max-w-xs leading-relaxed font-bold">
+                    {isRTL ? 'كل شيء محدث! سنقوم بإشعارك عند نشر أي مهمة جديدة تتوافق مع مهاراتك.' : 'Tout est à jour ! Vous recevrez une alerte en cas de nouvelle activité professionnelle.'}
                   </p>
                 </div>
-              )}
-            </div>
-
-          </div>
-        )}
-
-        {/* 5. SKILLS SETUP TAB */}
-        {activeTab === 'profile' && (
-          <div className="bg-white p-6 rounded-3xl border border-gray-200 shadow-xs animate-fade-in" id="worker-tab-profile">
-            
-            <div className="border-b border-gray-100 pb-3.5 mb-5 text-right">
-              <h3 className="text-sm font-black text-slate-800 flex items-center gap-1.5 justify-end">
-                <Sliders className="w-5 h-5 text-emerald-500" />
-                <span>{isRTL ? 'إعداد التخصصات والبيانات المهنية للعمل' : 'Configuration de mes expertises métier'}</span>
-              </h3>
-            </div>
-
-            <AnimatePresence>
-              {profileSuccessAlert && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  className="p-4 bg-emerald-50 text-emerald-800 border border-emerald-250 rounded-xl text-xs font-bold flex items-center gap-2 mb-5 text-right"
-                >
-                  <Check className="w-5 h-5 text-emerald-500 shrink-0" />
-                  <span>{isRTL ? 'بنجاح! تم تحديث وتنشيط ملفك الشخصي المهني وتخصصات أعمالك على منصات الرباط.' : 'Votre profil professionnel a été enregistré avec succès !'}</span>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            <form onSubmit={handleUpdateProfile} className="flex flex-col gap-5">
-              
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                
-                <div className="flex flex-col gap-2 text-right">
-                  <label className="text-xs font-bold text-gray-400">{isRTL ? 'الحي الرئيسي المفضل لأعمالك في الرباط' : 'Quartier principal de service'}</label>
-                  <select
-                    value={editLocation}
-                    onChange={(e) => setEditLocation(e.target.value)}
-                    className="px-3.5 py-3 border border-gray-200 rounded-xl text-xs font-extrabold focus:outline-none focus:border-emerald-500 bg-white"
-                  >
-                    {RABAT_NEIGHBORHOODS.map(n => (
-                      <option key={n.id} value={n.id}>{isRTL ? n.ar : n.fr}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="flex flex-col gap-2 text-right">
-                  <label className="text-xs font-bold text-gray-400">{isRTL ? 'الحد الأدنى المقبول لقيمة المهمة (MAD / DH)' : 'Tarif minimal accepté par prestation (DH)'}</label>
-                  <input
-                    type="number"
-                    value={editMinRate || 100}
-                    onChange={(e) => setEditMinRate(Number(e.target.value))}
-                    min={50}
-                    className="px-3.5 py-3 border border-gray-200 rounded-xl text-xs font-bold focus:outline-none focus:border-emerald-500"
-                    placeholder="Ex: 100 DH"
-                  />
-                </div>
-
-              </div>
-
-              <div className="flex flex-col gap-2 text-right">
-                <label className="text-xs font-bold text-gray-400">{isRTL ? 'نبذة جذابة عن خبراتك وشهاداتك (تظهر للعملاء)' : 'Ma Bio de présentation professionnelle'}</label>
-                <textarea
-                  value={editBio}
-                  onChange={(e) => setEditBio(e.target.value)}
-                  rows={4}
-                  placeholder={isRTL ? 'يرجى كتابة نبذة مقنعة مثلاً: سباك ورصاص معتمد خبرة 10 سنوات متواجد بأكدال وجاهز بمعداتي كاملة...' : 'Indiquez votre expérience, spécialités, matériel disponible...'}
-                  className="px-3.5 py-3 border border-gray-200 rounded-xl text-xs font-bold leading-relaxed focus:outline-none focus:border-emerald-500 resize-none"
-                  required
-                />
-              </div>
-
-              {/* Specialty selection checkboxes matrix */}
-              <div className="flex flex-col gap-2 text-right">
-                <label className="text-xs font-bold text-gray-400">{isRTL ? 'اختر وتنشيط التخصصات التي تتقنها لتلقي الطلبات' : 'Sélectionnez vos domaines d’intervention'}</label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3.5 mt-2">
-                  {SERVICE_CATEGORIES.map((cat) => {
-                    const isChecked = editSkills.includes(cat.id);
+              ) : (
+                <div className="flex flex-col gap-3">
+                  {notificationsList.map((notif) => {
                     return (
-                      <button
-                        type="button"
-                        key={cat.id}
-                        onClick={() => handleToggleSkill(cat.id)}
-                        className={`p-3.5 rounded-2xl border text-right transition-all flex items-center justify-between cursor-pointer select-none ${
-                          isChecked 
-                            ? 'border-emerald-500 bg-emerald-50 text-emerald-950 font-bold' 
-                            : 'border-gray-200 hover:border-gray-300 text-slate-600'
+                      <div
+                        key={notif.id}
+                        className={`p-4 sm:p-5 rounded-2xl border transition-all duration-200 flex items-start gap-4 text-right ${
+                          notif.read
+                            ? 'bg-white border-gray-150/80 shadow-xs'
+                            : 'bg-blue-50/40 border-blue-100 shadow-sm'
                         }`}
                       >
-                        <span className={`w-4 h-4 rounded-md border flex items-center justify-center ${
-                          isChecked ? 'bg-emerald-600 border-transparent text-white' : 'border-gray-300 bg-white'
+                        {/* Left dot badge */}
+                        <div className="flex items-center shrink-0 pt-1">
+                          {!notif.read && (
+                            <span className="w-2.5 h-2.5 bg-blue-600 rounded-full animate-pulse" />
+                          )}
+                        </div>
+
+                        {/* Icon */}
+                        <div className={`p-2.5 rounded-xl shrink-0 ${
+                          notif.type === 'welcome' ? 'bg-indigo-50 text-indigo-650' :
+                          notif.type === 'security' ? 'bg-emerald-50 text-emerald-650' :
+                          'bg-amber-50 text-amber-650'
                         }`}>
-                          {isChecked && <Check className="w-2.5 h-2.5" />}
-                        </span>
-                        
-                        <span className="text-xs font-extrabold">{isRTL ? cat.ar : cat.fr}</span>
-                      </button>
+                          {notif.type === 'welcome' && <Sparkles className="w-4 h-4" />}
+                          {notif.type === 'security' && <ShieldCheck className="w-4 h-4" />}
+                          {notif.type === 'announcement' && <AlertCircle className="w-4 h-4" />}
+                        </div>
+
+                        {/* Content */}
+                        <div className="flex-1 min-w-0 flex flex-col gap-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <h4 className="text-xs sm:text-sm font-black text-slate-900 truncate">
+                              {isRTL ? notif.titleAr : notif.titleFr}
+                            </h4>
+                            <span className="text-[9px] font-bold text-gray-400 whitespace-nowrap">
+                              {isRTL ? notif.timeAr : notif.timeFr}
+                            </span>
+                          </div>
+                          <p className="text-[10px] sm:text-xs text-gray-500 font-medium leading-relaxed">
+                            {isRTL ? notif.descAr : notif.descFr}
+                          </p>
+                        </div>
+
+                        {/* Action buttons */}
+                        <div className="flex items-center gap-1.5 shrink-0 self-center">
+                          {!notif.read && (
+                            <button
+                              onClick={() => handleMarkAsRead(notif.id)}
+                              className="p-1.5 hover:bg-white text-gray-400 hover:text-blue-600 rounded-lg border border-transparent hover:border-gray-100 transition-all cursor-pointer"
+                              title={isRTL ? 'تحديد كمقروء' : 'Marquer comme lu'}
+                            >
+                              <Check className="w-4 h-4" />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleDeleteNotification(notif.id)}
+                            className="p-1.5 hover:bg-white text-gray-400 hover:text-rose-600 rounded-lg border border-transparent hover:border-gray-100 transition-all cursor-pointer"
+                            title={isRTL ? 'حذف الإشعار' : 'Supprimer'}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
                     );
                   })}
                 </div>
+              )}
+            </div>
+          )}
+
+          {/* H. HELP & SUPPORT TAB */}
+          {activeTab === 'help' && (
+            <div className="flex flex-col gap-6 animate-fade-in" id="worker-tab-help">
+              <div className="flex items-center justify-between border-b pb-3 border-gray-200/60 text-right">
+                <div className="flex flex-col gap-0.5">
+                  <h3 className="text-sm font-black text-slate-900">{isRTL ? 'مركز الدعم الفني ومساعدة الحرفيين' : 'Aide & Support Partenaire'}</h3>
+                  <span className="text-[10px] text-gray-455 font-bold">
+                    {isRTL ? 'نحن هنا لضمان تجربة عمل ممتازة وضمان حقوقك المالية. تصفح الإرشادات أو أرسل استفسارك لفريق الدعم.' : 'Nous vous aidons à développer votre activité et sécuriser vos revenus.'}
+                  </span>
+                </div>
               </div>
 
-              <button
-                type="submit"
-                disabled={savingProfile}
-                className="w-full mt-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs sm:text-sm py-4 rounded-2xl cursor-pointer active:scale-98 transition-all flex items-center justify-center gap-1.5 shadow-sm disabled:opacity-50"
-              >
-                {savingProfile ? (
-                  <span>{isRTL ? 'جاري توثيق مهاراتكم...' : 'Enregistrement en cours...'}</span>
-                ) : (
-                  <>
-                    <Check className="w-4 h-4 text-white" />
-                    <span>{isRTL ? 'تنشيط وتحديث الملف المهني فورا' : 'Sauvegarder mes modifications'}</span>
-                  </>
-                )}
-              </button>
+              {/* Support Bento Grid Layout */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                
+                {/* Left 2 columns: FAQ toggles */}
+                <div className="lg:col-span-2 flex flex-col gap-4">
+                  <h4 className="text-xs font-black text-slate-800 flex items-center gap-1.5 justify-end">
+                    <span>{isRTL ? 'الأسئلة الشائعة وإرشادات العمل بالرباط' : 'Guide de Réussite & FAQ'}</span>
+                    <HelpCircle className="w-4 h-4 text-blue-600" />
+                  </h4>
 
-            </form>
+                  <div className="flex flex-col gap-2.5">
+                    {[
+                      {
+                        qAr: 'كيف يمكنني تقديم عرض سعر مقنع للعميل؟',
+                        qFr: 'Comment faire une offre convaincante pour le client ?',
+                        aAr: 'عند التقديم على مهمة، اكتب رسالة احترافية تبرز خبرتك السابقة وقدرتك على تلبية الطلب بدقة، وقدم سعراً عادلاً (بالدرهم) يشمل تكلفة المواد أو خدماتك فقط لتشجيع العميل على اختيارك.',
+                        aFr: 'Lorsque vous postulez, écrivez un message poli expliquant vos compétences. Proposez un tarif juste en DH qui reflète votre travail et gagnez la confiance du client.'
+                      },
+                      {
+                        qAr: 'متى وكيف يتم دفع مستحقاتي عن العمل؟',
+                        qFr: 'Quand et comment suis-je payé pour ma prestation ?',
+                        aAr: 'يتم حجز ميزانية المهمة في نظام الضمان الآمن بالمنصة بمجرد قبول العميل لعرضك. بمجرد الانتهاء من العمل وتأكيد العميل على لوحة التحكم، يتم تحويل المبلغ فوراً إلى محفظتك بالمنصة لتتمكن من سحبه لحسابك البنكي.',
+                        aFr: 'Dès que le client accepte votre offre, l\'argent est bloqué par la plateforme. Une fois la tâche achevée, le client valide la fin de mission, libérant immédiatement les fonds dans votre portefeuille.'
+                      },
+                      {
+                        qAr: 'كيف يمكنني سحب الأرباح من محفظتي بالمنصة؟',
+                        qFr: 'Comment transférer mes gains vers mon compte bancaire ?',
+                        aAr: 'توجه إلى علامة تبويب "المحفظة وسحب الأرباح"، وحدد المبلغ المراد سحبه، ثم أدخل رقم الحساب البنكي (RIB) المكون من 24 رقماً الخاص بك. تتم معالجة التحويلات البنكية المحلية خلال 24 إلى 48 ساعة عمل.',
+                        aFr: 'Allez dans l\'onglet "Gains & Versements", entrez le montant et configurez votre code RIB (24 chiffres). Les virements bancaires vers les banques marocaines prennent généralement entre 24h et 48h.'
+                      },
+                      {
+                        qAr: 'كيف أتعامل مع إلغاء المهمة أو النزاعات؟',
+                        qFr: 'Que faire en cas d\'annulation de mission ou de litige ?',
+                        aAr: 'في حال حدوث سوء تفاهم مع العميل أو طلب إلغاء غير مبرر، لا تتردد في استخدام نموذج الدعم الفني بالأسفل. سيقوم فريق الإشراف لدينا بمراجعة رسائل الدردشة والصور والتحقق لإعطاء كل ذي حق حقه بالعدل.',
+                        aFr: 'En cas de désaccord avec un client ou d\'annulation injuste, contactez-nous via le formulaire ci-dessous. Un conseiller analysera la situation et l\'historique des chats pour résoudre le problème.'
+                      }
+                    ].map((faq, index) => {
+                      const isOpen = activeFaqIndex === index;
+                      return (
+                        <div
+                          key={index}
+                          className="bg-white border border-gray-150 rounded-2xl overflow-hidden transition-all duration-300"
+                        >
+                          <button
+                            onClick={() => setActiveFaqIndex(isOpen ? null : index)}
+                            className="w-full p-4.5 flex items-center justify-between text-right cursor-pointer hover:bg-slate-50 transition-colors"
+                          >
+                            <ChevronRight className={`w-4 h-4 text-gray-400 transition-transform duration-300 ${isOpen ? 'rotate-90' : 'rotate-0'}`} />
+                            <span className="text-xs sm:text-sm font-black text-slate-800">
+                              {isRTL ? faq.qAr : faq.qFr}
+                            </span>
+                          </button>
+                          {isOpen && (
+                            <div className="px-4.5 pb-4.5 pt-1 text-[10px] sm:text-xs text-gray-500 font-bold leading-relaxed border-t border-gray-100 bg-slate-50/50">
+                              {isRTL ? faq.aAr : faq.aFr}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
 
-          </div>
-        )}
+                {/* Right column: Interactive Support Form */}
+                <div className="bg-white p-5 rounded-3xl border border-gray-150 shadow-xs flex flex-col gap-4 text-right">
+                  <h4 className="text-xs font-black text-slate-800 flex items-center gap-1.5 justify-end">
+                    <span>{isRTL ? 'تذكرة دعم فني جديدة' : 'Ouvrir un ticket support'}</span>
+                    <Phone className="w-4 h-4 text-blue-600" />
+                  </h4>
 
-      </main>
+                  {supportSuccess ? (
+                    <div className="p-5 bg-emerald-50 border border-emerald-100 rounded-2xl flex flex-col items-center gap-3 text-center my-4 animate-fade-in">
+                      <div className="p-2.5 bg-emerald-100 text-emerald-700 rounded-full">
+                        <Check className="w-5 h-5" />
+                      </div>
+                      <span className="text-xs font-black text-slate-850">
+                        {isRTL ? 'تم الإرسال بنجاح' : 'Envoyé avec succès'}
+                      </span>
+                      <p className="text-[10px] text-gray-550 leading-relaxed font-bold">
+                        {isRTL 
+                          ? 'شكراً لك! تم تسليم استفسارك لفريق دعم الحرفيين بنجاح. سنقوم بالرد عليك هاتفياً أو عبر البريد الإلكتروني لحل مشكلتك بأسرع وقت.' 
+                          : 'Merci ! Notre équipe a bien reçu votre demande et vous répondra sous 24 heures.'}
+                      </p>
+                      <button
+                        onClick={() => {
+                          setSupportSuccess(false);
+                          setSupportMessage('');
+                        }}
+                        className="mt-2 text-[10px] bg-white hover:bg-gray-55 text-gray-650 border border-gray-200 font-black px-4.5 py-1.5 rounded-xl transition-all cursor-pointer"
+                      >
+                        {isRTL ? 'إرسال تذكرة أخرى' : 'Envoyer un autre message'}
+                      </button>
+                    </div>
+                  ) : (
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        if (!supportMessage.trim()) return;
+                        setSupportSuccess(true);
+                      }}
+                      className="flex flex-col gap-3.5"
+                    >
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] text-gray-400 font-black">
+                          {isRTL ? 'نوع المشكلة / فئة الدعم' : 'Catégorie d\'assistance'}
+                        </label>
+                        <select
+                          value={supportCategory}
+                          onChange={(e) => setSupportCategory(e.target.value)}
+                          className="w-full text-xs border border-gray-200 rounded-xl px-3.5 py-2.5 bg-white focus:outline-none focus:border-blue-500 font-bold"
+                        >
+                          <option value="general">{isRTL ? 'استفسار عام / مساعدة' : 'Assistance générale'}</option>
+                          <option value="billing">{isRTL ? 'مشاكل سحب الأرباح أو الضمان' : 'Gains & Versements'}</option>
+                          <option value="report">{isRTL ? 'الإبلاغ عن نزاع مع زبون' : 'Litige avec un client'}</option>
+                          <option value="suggestion">{isRTL ? 'اقتراحات تطوير المنصة' : 'Suggestion d\'amélioration'}</option>
+                        </select>
+                      </div>
 
-      {/* MODAL OVERLAY: PLACE DEV-BID MESSAGE DIALOG SCREEN */}
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] text-gray-400 font-black">
+                          {isRTL ? 'تفاصيل الرسالة أو المشكلة' : 'Description de votre problème'}
+                        </label>
+                        <textarea
+                          required
+                          rows={4}
+                          value={supportMessage}
+                          onChange={(e) => setSupportMessage(e.target.value)}
+                          placeholder={isRTL ? 'اكتب تفاصيل استفسارك أو مشكلتك بوضوح لمساعدتك...' : 'Décrivez votre problème en détails...'}
+                          className="w-full text-xs border border-gray-200 rounded-xl px-3.5 py-2.5 bg-white focus:outline-none focus:border-blue-500 font-bold resize-none leading-relaxed"
+                        />
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={!supportMessage.trim()}
+                        className="w-full bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs py-3 rounded-xl transition-all cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 shadow-sm"
+                      >
+                        <Send className="w-3.5 h-3.5 text-white" />
+                        <span>{isRTL ? 'إرسال تذكرة الدعم' : 'Envoyer le ticket'}</span>
+                      </button>
+                    </form>
+                  )}
+                </div>
+
+              </div>
+            </div>
+          )}
+
+        </main>
+      </div>
+
+      {/* PLACE BID / PITCH FORM DIALOG MODAL */}
       <AnimatePresence>
         {focusedTask && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
@@ -1477,7 +1294,7 @@ export default function WorkerDashboard({
               
               <button
                 onClick={() => setFocusedTask(null)}
-                className="p-1 px-2.5 bg-slate-100 hover:bg-slate-200 rounded-full transition-colors absolute top-4 left-4 cursor-pointer text-slate-500"
+                className="p-1 px-2.5 bg-slate-100 hover:bg-slate-200 rounded-full transition-colors absolute top-4 left-4 cursor-pointer text-slate-505"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1487,7 +1304,9 @@ export default function WorkerDashboard({
                   {isRTL ? 'تقديم صفقة عمل' : 'Créer Devis'}
                 </span>
                 <h3 className="text-base font-black text-slate-900 mt-2">{focusedTask.title}</h3>
-                <p className="text-xs text-slate-400 font-bold mt-1">{isRTL ? 'الميزانية المقترحة من الزبون:' : 'Budget client:'} {focusedTask.budget} DH</p>
+                <p className="text-xs text-slate-400 font-bold mt-1">
+                  {isRTL ? 'الميزانية المقترحة من الزبون:' : 'Budget client:'} {focusedTask.budget} DH
+                </p>
               </div>
 
               {bidSuccessMessage ? (
@@ -1504,7 +1323,7 @@ export default function WorkerDashboard({
                       value={pitchAmount}
                       onChange={(e) => setPitchAmount(Number(e.target.value))}
                       min={50}
-                      className="px-3.5 py-3 border border-gray-200 rounded-xl text-xs font-black focus:outline-none focus:border-emerald-500"
+                      className="px-3.5 py-3 border border-gray-200 rounded-xl text-xs font-black focus:outline-none focus:border-emerald-500 bg-white"
                       required
                     />
                   </div>
@@ -1516,7 +1335,7 @@ export default function WorkerDashboard({
                       onChange={(e) => setPitchMessage(e.target.value)}
                       rows={5}
                       placeholder={isRTL ? 'مثال: السلام عليكم، أنا مهتم بمهمتك وجاهز للحضور فوراً ومحمل بجميع أدوات الصيانة اللازمة تواصل معي لمناقشة التفاصيل...' : 'Décrivez votre démarche, vos outils, vos garanties...'}
-                      className="px-3.5 py-3 border border-gray-200 rounded-xl text-xs font-extrabold focus:outline-none focus:border-emerald-500 resize-none leading-relaxed"
+                      className="px-3.5 py-3 border border-gray-200 rounded-xl text-xs font-extrabold focus:outline-none focus:border-emerald-555 resize-none leading-relaxed"
                       required
                     />
                   </div>

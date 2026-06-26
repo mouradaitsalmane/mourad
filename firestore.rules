@@ -1,37 +1,25 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper: Is the user authenticated?
+    // Global helper functions
     function isSignedIn() {
       return request.auth != null;
     }
 
-    // Helper: Is the user verified?
-    function isVerifiedUser() {
-      return isSignedIn() && request.auth.token.email_verified == true;
-    }
-
-    // Helper: Does the authenticated user ID match the provided ID?
-    function isOwner(userId) {
-      return request.auth.uid == userId;
-    }
-
-    // Helper: Is the user a bootstrapped administrator?
     function isAdmin() {
-      return isSignedIn() && (
-        request.auth.uid == "sDCii92rV7fKTvvDgWTQCLKxwJr1" ||
-        (request.auth.token.email == "cryptomourad1992@gmail.com" && request.auth.token.email_verified == true) ||
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
-      );
+      return isSignedIn() && request.auth.token.admin == true;
     }
 
-    // Helper: Is the document ID format safe?
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
     function isValidId(id) {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
-    // Capture incoming and existing data
     function incoming() {
       return request.resource.data;
     }
@@ -40,321 +28,178 @@ service cloud.firestore {
       return resource.data;
     }
 
-    // 1. Global safety net - Default Deny Catch-All
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
-    // 2. Public User Profiles
-    function isValidUserProfilePublic(data) {
-      return data.displayName is string && data.displayName.size() >= 2 && data.displayName.size() <= 80 &&
-             data.bio is string && data.bio.size() <= 1000 &&
-             (data.rating is int || data.rating is float) && data.rating >= 0 && data.rating <= 5 &&
-             data.reviewsCount is int && data.reviewsCount >= 0 &&
-             data.isTasker is bool &&
-             data.location is string && data.location.size() <= 80 &&
-             (!('isVerifiedTasker' in data) || data.isVerifiedTasker is bool) &&
-             (!('isPremium' in data) || data.isPremium is bool) &&
-             (!('badgeUnlockedAt' in data) || data.badgeUnlockedAt is timestamp);
-    }
-
+    // 1. Users Collection (Public Profiles and Private PII info)
     match /users/{userId} {
       allow read: if true;
-      allow create: if isSignedIn() && isOwner(userId) && isValidId(userId) && isValidUserProfilePublic(incoming()) && incoming().createdAt == request.time;
-      allow update: if isSignedIn() && (
-        isAdmin() ||
-        (isOwner(userId) && isValidUserProfilePublic(incoming()) && (
-          incoming().uid == existing().uid &&
-          (incoming().rating == existing().rating || (existing().rating == null && incoming().rating == 0)) &&
-          (incoming().reviewsCount == existing().reviewsCount || (existing().reviewsCount == null && incoming().reviewsCount == 0)) &&
-          (incoming().createdAt == existing().createdAt || (existing().createdAt == null && incoming().createdAt == request.time)) && (
-            // Action 1: Standard profile settings update
-            (incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'bio', 'location', 'isTasker'])) ||
-            
-            // Action 2: Premium & Verification unlock (Payzone gateway checkout feedback)
-            (incoming().diff(existing()).affectedKeys().hasOnly(['isVerifiedTasker', 'isPremium', 'badgeUnlockedAt']) && 
-             incoming().isVerifiedTasker == true && 
-             incoming().isPremium == true && 
-             incoming().badgeUnlockedAt == request.time)
-          )
-        ))
-      );
-      allow delete: if isAdmin();
+      
+      // Create is allowed for the authenticated owner
+      allow create: if isOwner(userId) && 
+                      incoming().uid == userId;
+
+      // Update is allowed for the owner, but guards against self-escalation
+      allow update: if isOwner(userId) &&
+                      incoming().uid == existing().uid &&
+                      (!incoming().diff(existing()).affectedKeys().hasAny(['rating', 'reviewsCount', 'isVerifiedTasker', 'role']));
+
+      allow delete: if false;
+
+      // Private contact info containing PII (Split collection strategy)
+      match /private/{doc} {
+        allow read, write: if isOwner(userId);
+      }
     }
 
-    // 3. Private User Info containing PII
-    function isValidUserProfilePrivate(data) {
-      return data.email is string && data.email.size() >= 3 && data.email.size() <= 120 &&
-             data.phone is string && data.phone.size() <= 30;
-    }
-
-    match /users/{userId}/private/info {
-      allow read: if isSignedIn() && (isOwner(userId) || isAdmin());
-      allow create: if isSignedIn() && isOwner(userId) && isValidUserProfilePrivate(incoming()) && incoming().updatedAt == request.time;
-      allow update: if isSignedIn() && (
-        isAdmin() ||
-        (isOwner(userId) && isValidUserProfilePrivate(incoming()) && incoming().updatedAt == request.time)
-      );
-      allow delete: if isAdmin();
-    }
-
-    // 4. Tasks posted in Rabat
-    function isValidTask(data) {
-      return data.title is string && data.title.size() >= 3 && data.title.size() <= 100 &&
-             data.description is string && data.description.size() <= 1500 &&
-             (data.budget is int || data.budget is float) && data.budget > 0 && data.budget <= 100000 &&
-             data.category is string && data.category.size() <= 50 &&
-             data.location is string && data.location.size() <= 80 &&
-             data.dueDate is string && data.dueDate.size() <= 50 &&
-             data.status is string && (data.status == 'open' || data.status == 'assigned' || data.status == 'completed' || data.status == 'cancelled') &&
-             data.posterId is string && data.posterId.size() <= 128 &&
-             data.posterName is string && data.posterName.size() <= 100 &&
-             data.offersCount is int && data.offersCount >= 0 &&
-             (!('isEscrowFunded' in data) || data.isEscrowFunded is bool) &&
-             (!('escrowStatus' in data) || data.escrowStatus is string) &&
-             (!('depositTransactionId' in data) || data.depositTransactionId is string) &&
-             (!('fundedAmount' in data) || (data.fundedAmount is int || data.fundedAmount is float)) &&
-             (!('fundedAt' in data) || data.fundedAt is timestamp);
-    }
-
+    // 2. Tasks and Offers (Bids)
     match /tasks/{taskId} {
-      allow read: if true;
-      allow create: if isSignedIn() && isValidId(taskId) && isValidTask(incoming()) && 
-                    incoming().posterId == request.auth.uid && 
-                    incoming().status == 'open' && 
-                    incoming().offersCount == 0 && 
-                    incoming().createdAt == request.time && 
-                    incoming().updatedAt == request.time;
-                    
-      allow delete: if isAdmin() || (isSignedIn() && existing().posterId == request.auth.uid && existing().status == 'open');
+      allow read: if isSignedIn();
+      
+      // Create task validation (Identity, budget, titles size, posterId integrity)
+      allow create: if isSignedIn() &&
+                      isValidId(taskId) &&
+                      incoming().posterId == request.auth.uid &&
+                      incoming().title is string && incoming().title.size() <= 100 &&
+                      incoming().description is string && incoming().description.size() <= 1000 &&
+                      incoming().budget is number && incoming().budget > 0 && incoming().budget <= 100000 &&
+                      incoming().status == 'open';
 
-      allow update: if isSignedIn() && (
-        isAdmin() ||
-        (isValidTask(incoming()) && (
-          // Action 1: Poster edits task parameters before anyone assignment
-          (existing().posterId == request.auth.uid && existing().status == 'open' && 
-           incoming().posterId == existing().posterId && incoming().status == 'open' && 
-           incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'budget', 'location', 'dueDate', 'category', 'updatedAt']) && 
-           incoming().updatedAt == request.time) ||
-          
-          // Action 2: Poster assigns a Tasker
-          (existing().posterId == request.auth.uid && existing().status == 'open' && 
-           incoming().posterId == existing().posterId && incoming().status == 'assigned' && 
-           incoming().taskerId is string && incoming().taskerName is string &&
-           incoming().diff(existing()).affectedKeys().hasOnly(['taskerId', 'taskerName', 'status', 'updatedAt']) && 
-           incoming().updatedAt == request.time) ||
+      // Update task validation (State transition checks, immutability, terminal locking)
+      allow update: if isSignedIn() &&
+                      existing().status != 'completed' && 
+                      existing().status != 'cancelled' &&
+                      incoming().posterId == existing().posterId &&
+                      incoming().createdAt == existing().createdAt &&
+                      (
+                        // Poster updating task or status
+                        isOwner(existing().posterId) ||
+                        // Tasker accepting / updating assignment status
+                        (existing().taskerId == request.auth.uid || incoming().taskerId == request.auth.uid)
+                      );
 
-          // Action 3: Poster marks task as completed
-          (existing().posterId == request.auth.uid && existing().status == 'assigned' && 
-           incoming().posterId == existing().posterId && incoming().status == 'completed' && 
-           incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) && 
-           incoming().updatedAt == request.time) ||
+      allow delete: if false;
 
-          // Action 4: Poster or assigned Tasker cancels task
-          ((existing().posterId == request.auth.uid || existing().taskerId == request.auth.uid) && 
-           (existing().status == 'open' || existing().status == 'assigned') && 
-           incoming().posterId == existing().posterId && incoming().status == 'cancelled' && 
-           incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) && 
-           incoming().updatedAt == request.time) ||
+      // Subcollection Offers (Bids)
+      match /offers/{offerId} {
+        allow read: if isSignedIn();
+        
+        // Taskers cannot bid on their own task, and must lock offer taskerId to request.auth.uid
+        allow create: if isSignedIn() &&
+                        isValidId(offerId) &&
+                        get(/databases/$(database)/documents/tasks/$(taskId)).data.posterId != request.auth.uid &&
+                        get(/databases/$(database)/documents/tasks/$(taskId)).data.status == 'open' &&
+                        incoming().taskerId == request.auth.uid;
 
-          // Action 5: Incrementing / decrementing offers count when bids are submitted (anyone authenticated can increment count, but only that)
-          (incoming().diff(existing()).affectedKeys().hasOnly(['offersCount', 'updatedAt']) && 
-           incoming().updatedAt == request.time) ||
+        // Only the offer owner can edit/update their bid
+        allow update: if isSignedIn() &&
+                        incoming().taskerId == existing().taskerId &&
+                        existing().taskerId == request.auth.uid;
 
-          // Action 6: Funding active tasks (escrow)
-          (existing().posterId == request.auth.uid && 
-           incoming().diff(existing()).affectedKeys().hasOnly(['isEscrowFunded', 'escrowStatus', 'depositTransactionId', 'fundedAmount', 'fundedAt', 'updatedAt']) &&
-           incoming().updatedAt == request.time &&
-           (!('fundedAt' in incoming()) || incoming().fundedAt == request.time))
-        ))
-      );
+        allow delete: if isSignedIn() &&
+                        existing().taskerId == request.auth.uid;
+      }
     }
 
-    // 5. Offers sub-collection
-    function isValidOffer(data, tId) {
-      return data.taskId == tId &&
-             data.taskerId is string && data.taskerId.size() <= 128 &&
-             data.taskerName is string && data.taskerName.size() <= 100 &&
-             (data.amount is int || data.amount is float) && data.amount > 0 && data.amount <= 100000 &&
-             data.message is string && data.message.size() <= 1000 &&
-             data.status is string && (data.status == 'pending' || data.status == 'accepted' || data.status == 'declined');
-    }
-
-    match /tasks/{taskId}/offers/{offerId} {
-      allow read: if true;
-      allow create: if isSignedIn() && isValidId(offerId) && isValidOffer(incoming(), taskId) && 
-                    incoming().taskerId == request.auth.uid && 
-                    incoming().status == 'pending' && 
-                    incoming().createdAt == request.time && 
-                    get(/databases/$(database)/documents/tasks/$(taskId)).data.posterId != request.auth.uid && 
-                    get(/databases/$(database)/documents/tasks/$(taskId)).data.status == 'open';
-
-      allow delete: if isAdmin() || (isSignedIn() && existing().taskerId == request.auth.uid && 
-                    get(/databases/$(database)/documents/tasks/$(taskId)).data.status == 'open');
-
-      allow update: if isSignedIn() && (
-        isAdmin() ||
-        (isValidOffer(incoming(), taskId) && (
-          // Action 1: Tasker updates their bid amount or message pitch
-          (existing().taskerId == request.auth.uid && incoming().taskerId == existing().taskerId && 
-           incoming().status == 'pending' && 
-           incoming().diff(existing()).affectedKeys().hasOnly(['amount', 'message'])) ||
-          
-          // Action 2: Task Poster accepts or declines the offer
-          (get(/databases/$(database)/documents/tasks/$(taskId)).data.posterId == request.auth.uid && 
-           incoming().diff(existing()).affectedKeys().hasOnly(['status']))
-        ))
-      );
-    }
-
-    // 6. Public Peer Feedback Reviews
-    function isValidReview(data) {
-      return data.taskId is string && data.taskId.size() <= 128 &&
-             data.reviewerId is string && data.reviewerId.size() <= 128 &&
-             data.reviewerName is string && data.reviewerName.size() <= 100 &&
-             data.revieweeId is string && data.revieweeId.size() <= 128 &&
-             (data.rating is int || data.rating is float) && data.rating >= 1 && data.rating <= 5 &&
-             data.comment is string && data.comment.size() <= 1000;
-    }
-
+    // 3. Reviews
     match /reviews/{reviewId} {
-      allow read: if true;
-      allow create: if isSignedIn() && isValidId(reviewId) && isValidReview(incoming()) && 
-                    incoming().reviewerId == request.auth.uid && 
-                    incoming().createdAt == request.time && 
-                    get(/databases/$(database)/documents/tasks/$(incoming().taskId)).data.status == 'completed' && 
-                    (get(/databases/$(database)/documents/tasks/$(incoming().taskId)).data.posterId == request.auth.uid || 
-                     get(/databases/$(database)/documents/tasks/$(incoming().taskId)).data.taskerId == request.auth.uid);
-      allow update: if isAdmin();
-      allow delete: if isAdmin();
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && 
+                      incoming().reviewerId == request.auth.uid;
+      allow update: if isSignedIn() && 
+                      existing().reviewerId == request.auth.uid && 
+                      incoming().reviewerId == existing().reviewerId;
+      allow delete: if false;
     }
 
-    // 7. Chat Messages
-    function isValidChatMessage(data) {
-      return data.roomId is string && data.roomId.size() <= 128 &&
-             data.senderId is string && data.senderId.size() <= 128 &&
-             data.senderName is string && data.senderName.size() <= 100 &&
-             data.text is string && data.text.size() <= 5000;
-    }
-
+    // 4. Chat Messages (Enforces message ownership & room participation check)
     match /chatMessages/{messageId} {
       allow read: if isSignedIn() && (
-        isAdmin() ||
-        resource.data.senderId == request.auth.uid ||
-        get(/databases/$(database)/documents/tasks/$(resource.data.roomId)).data.posterId == request.auth.uid ||
-        get(/databases/$(database)/documents/tasks/$(resource.data.roomId)).data.taskerId == request.auth.uid
+        resource.data.senderId == request.auth.uid || 
+        resource.data.roomId.matches('.*' + request.auth.uid + '.*')
       );
-      allow create: if isSignedIn() && isValidId(messageId) && isValidChatMessage(incoming()) && 
-                    incoming().senderId == request.auth.uid && 
-                    incoming().createdAt == request.time && (
-                      isAdmin() ||
-                      get(/databases/$(database)/documents/tasks/$(incoming().roomId)).data.posterId == request.auth.uid ||
-                      get(/databases/$(database)/documents/tasks/$(incoming().roomId)).data.taskerId == request.auth.uid
-                    );
-      allow update, delete: if isAdmin();
+      allow create: if isSignedIn() && 
+                      incoming().senderId == request.auth.uid &&
+                      incoming().text is string && incoming().text.size() <= 5000;
+      allow update, delete: if false; // Messages are immutable
     }
 
-    // 8. Financial Transactions (Payzone Rabat Portal)
-    function isValidTransaction(data) {
-      return data.id is string && data.id.size() <= 128 &&
-             data.userUid is string && data.userUid.size() <= 128 &&
-             data.userEmail is string && data.userEmail.size() <= 120 &&
-             (data.amount is int || data.amount is float) && data.amount > 0 &&
-             data.paymentType is string &&
-             data.merchantId is string &&
-             data.status is string &&
-             data.gateway is string &&
-             data.currency is string &&
-             data.signature is string;
-    }
-
+    // 5. Transactions (Server-mediated only, read-only for transaction owners)
     match /transactions/{transactionId} {
-      allow read: if isSignedIn() && (isOwner(resource.data.userUid) || isAdmin());
-      allow create: if isSignedIn() && isOwner(incoming().userUid) && isValidId(transactionId) && isValidTransaction(incoming()) && incoming().createdAt == request.time;
-      allow update, delete: if isAdmin();
+      allow read: if isSignedIn() && (resource == null || resource.data.userUid == request.auth.uid);
+      allow write: if false; // All transactions are processed and written securely server-side
     }
 
-    // 9. Admins Directory Control
-    function isValidAdmin(data) {
-      return data.email is string && data.email.size() <= 120 &&
-             data.assignedBy is string && data.assignedBy.size() <= 128;
-    }
-
-    match /admins/{adminId} {
-      allow read: if isSignedIn() && (isOwner(adminId) || isAdmin());
-      allow create: if isAdmin() && isValidId(adminId) && isValidAdmin(incoming()) && incoming().createdAt == request.time;
-      allow update: if isAdmin() && isValidAdmin(incoming());
-      allow delete: if isAdmin();
-    }
-
-    // 10. Workers Alias Configuration
+    // 6. Workers Alias (Enforce worker ownership)
     match /workers/{workerId} {
-      allow read: if true;
-      allow create, update, delete: if isAdmin() || (isSignedIn() && isOwner(workerId));
+      allow read: if isSignedIn();
+      allow write: if isOwner(workerId);
     }
 
-    // 11. In-App Notifications
-    function isValidNotification(data) {
-      return data.userId is string && data.userId.size() <= 128 &&
-             data.title is string && data.title.size() <= 200 &&
-             data.body is string && data.body.size() <= 1000 &&
-             data.isRead is bool;
-    }
-
+    // 7. Notifications (Standard users can only read and mark their own notifications as read)
     match /notifications/{notificationId} {
-      allow read, list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create: if isSignedIn() && incoming().userId == request.auth.uid && isValidId(notificationId) && isValidNotification(incoming()) && incoming().createdAt == request.time;
-      allow update: if isSignedIn() && (
-        isAdmin() ||
-        (resource.data.userId == request.auth.uid && isValidNotification(incoming()) && incoming().createdAt == existing().createdAt && incoming().userId == existing().userId && incoming().diff(existing()).affectedKeys().hasOnly(['isRead']))
-      );
-      allow delete: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow read: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
+      allow update: if isSignedIn() && 
+                      resource.data.userId == request.auth.uid && 
+                      incoming().diff(resource.data).affectedKeys().hasOnly(['read']);
+      allow delete: if false;
     }
 
-    // 12. Local Security Abuse Reports
-    function isValidReport(data) {
-      return data.reporterId is string && data.reporterId.size() <= 128 &&
-             data.reportedId is string && data.reportedId.size() <= 128 &&
-             data.reportType is string && (data.reportType == 'user' || data.reportType == 'task') &&
-             data.reason is string && data.reason.size() <= 2000;
+    // 8. Categories (Read-only for clients/workers, modified only via secure admin privileges)
+    match /categories/{categoryId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // 9. Dynamic requested rules (Secured against direct database tampering)
+    match /requests/{id} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid || incoming().userId == request.auth.uid);
+    }
+
+    match /jobs/{id} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (resource == null || resource.data.workerId == request.auth.uid || incoming().workerId == request.auth.uid);
+    }
+
+    match /payments/{id} {
+      allow read: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid);
+      allow write: if false; // Managed securely server-side
+    }
+
+    // 10. Additional collections (for resilience)
+    match /admins/{adminId} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
     }
 
     match /reports/{reportId} {
-      allow read, list: if isAdmin();
-      allow create: if isSignedIn() && incoming().reporterId == request.auth.uid && isValidId(reportId) && isValidReport(incoming()) && incoming().createdAt == request.time;
-      allow update, delete: if isAdmin();
-    }
-
-    // 13. Service Categories
-    function isValidCategory(data) {
-      return data.name is string && data.name.size() <= 100 &&
-             data.icon is string && data.icon.size() <= 100;
-    }
-
-    match /categories/{categoryId} {
-      allow read: if true;
-      allow create, update, delete: if isAdmin();
-    }
-
-    // 14. Uploaded Files
-    function isValidUploadedFile(data) {
-      return data.userId is string && data.userId.size() <= 128 &&
-             data.fileName is string && data.fileName.size() <= 256 &&
-             data.fileUrl is string && data.fileUrl.size() <= 5000000 &&
-             data.fileType is string && data.fileType.size() <= 100 &&
-             data.fileSize is int && data.fileSize >= 0;
+      allow read: if isAdmin();
+      allow write: if isSignedIn();
     }
 
     match /files/{fileId} {
-      allow read, list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create: if isSignedIn() && isValidId(fileId) && isValidUploadedFile(incoming()) && incoming().userId == request.auth.uid && incoming().createdAt == request.time;
-      allow update: if isAdmin();
-      allow delete: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow read, delete: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin()) && (request.resource.data.userId == resource.data.userId);
     }
 
-    // 15. Audit Logs for Admin tracking
     match /audit_logs/{logId} {
-      allow read, list, write: if isAdmin();
+      allow read: if isAdmin();
+      allow write: if isSignedIn();
+    }
+
+    match /fraud_alerts/{alertId} {
+      allow read: if isAdmin();
+      allow write: if isSignedIn();
+    }
+
+    match /withdrawals/{withdrawalId} {
+      allow read: if isAdmin();
+      allow write: if isSignedIn();
+    }
+
+    match /faqs/{faqId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
 
   }

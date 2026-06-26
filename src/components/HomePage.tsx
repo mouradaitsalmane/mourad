@@ -57,6 +57,7 @@ export default function HomePage({
 }: HomePageProps) {
   const isRTL = lang === 'ar';
   const [searchInput, setSearchInput] = useState('');
+  const [openTrustId, setOpenTrustId] = useState<string | null>(null);
 
   // 4 Open tasks for showroom preview
   const openTasksPreview = tasks
@@ -177,7 +178,7 @@ export default function HomePage({
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.4, delay: 0.3 }}
-                className="mt-8 bg-white border border-gray-150-300 p-2 sm:p-2.5 rounded-2xl sm:rounded-3xl shadow-xl shadow-slate-100/80 hover:shadow-2xl hover:border-gray-300 focus-within:ring-4 focus-within:ring-sky-500/10 focus-within:border-sky-500 transition-all text-right"
+                className="mt-8 bg-white border border-gray-200 p-2 sm:p-2.5 rounded-2xl sm:rounded-3xl shadow-xl shadow-slate-100/80 hover:shadow-2xl hover:border-gray-300 focus-within:ring-4 focus-within:ring-sky-500/10 focus-within:border-sky-500 transition-all text-right"
               >
                 <form onSubmit={handleSearchSubmit} className="flex flex-col md:flex-row gap-2 items-stretch md:items-center">
                   
@@ -420,7 +421,7 @@ export default function HomePage({
       </section>
 
       {/* FEATURED TASKER SPOTLIGHT (An exact creative representation of our local brand power) */}
-      <section className="bg-slate-50 py-16 sm:py-20 border-b border-gray-150-300" id="homepage-tasker-spotlight">
+      <section className="bg-slate-50 py-16 sm:py-20 border-b border-gray-100" id="homepage-tasker-spotlight">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           
           <div className="text-center max-w-2xl mx-auto mb-12">
@@ -556,7 +557,7 @@ export default function HomePage({
       </section>
 
       {/* 3. HOW IT WORKS SECTION (Sequential 4 columns layout) */}
-      <section className="bg-white py-16 sm:py-20 border-b border-gray-150-300" id="homepage-how-it-works">
+      <section className="bg-white py-16 sm:py-20 border-b border-gray-100" id="homepage-how-it-works">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           
           {/* Main Title Header */}
@@ -645,7 +646,7 @@ export default function HomePage({
       </section>
 
       {/* NEW TRUST & SAFETY PREMIUM COHESIVE SECTION */}
-      <section className="bg-white py-16 sm:py-24 border-b border-gray-150-300 relative overflow-hidden" id="homepage-trust-and-safety-features">
+      <section className="bg-white py-16 sm:py-24 border-b border-gray-100 relative overflow-hidden" id="homepage-trust-and-safety-features">
         {/* Soft designer glows */}
         <div className="absolute top-1/2 left-0 w-80 h-80 bg-sky-200/20 rounded-full blur-[120px] pointer-events-none -translate-x-12" />
         <div className="absolute bottom-0 right-10 w-96 h-96 bg-indigo-100/30 rounded-full blur-[140px] pointer-events-none translate-x-20" />
@@ -744,12 +745,12 @@ export default function HomePage({
               <div className="space-y-6 mb-10">
                 
                 {/* 1. PAYMENTS */}
-                <div className="group p-5 sm:p-6 rounded-3xl bg-slate-50/50 hover:bg-slate-50 border border-slate-150-100 hover:border-sky-200 transition-all duration-300">
+                <div className="group p-5 sm:p-6 rounded-3xl bg-slate-50/50 hover:bg-slate-50 border border-slate-200 hover:border-sky-300 transition-all duration-300">
                   <div className={`flex gap-4 items-start ${isRTL ? 'flex-row-reverse' : ''}`}>
                     <div className="w-12 h-12 rounded-2xl bg-sky-100 text-sky-600 flex items-center justify-center font-bold shrink-0 shadow-sm group-hover:scale-105 transition-transform">
                       <CreditCard className="w-6 h-6" />
                     </div>
-                    <div className="flex flex-col">
+                    <div className="flex flex-col w-full">
                       <h4 className="text-base sm:text-lg font-black text-slate-900" style={{ fontFamily: '"Cairo", sans-serif' }}>
                         {isRTL ? 'مدفوعات آمنة ومحمية' : 'Paiements hautement sécurisés'}
                       </h4>
@@ -758,23 +759,34 @@ export default function HomePage({
                           ? 'لا تقم بتحويل الدفعة إلا بعد إتمام المهمة بما يرضيك بسلام بنسبة 100%.' 
                           : 'Vos fonds sont réservés en toute sécurité lors de l’attribution et ne sont transmis au Tasker que lorsque vous validez.'}
                       </p>
+                      
                       <button 
-                        onClick={() => alert(isRTL ? 'بفضل شراكتنا مع بوابة الدفع الآمنة، نحتفظ بالميزانية في مأمن كامل ولا يتم إرسالها لمزود الخدمة إلا بإذن صريح منك بعد الرضا الكامل.' : 'Grâce à notre partenaire bancaire sécurisé, votre budget est conservé sous séquestre et n’est libéré qu’avec votre confirmation finale.')}
-                        className="text-xs font-black text-sky-600 hover:text-sky-700 tracking-wider text-right flex items-center gap-1 mt-2 hover:underline cursor-pointer bg-transparent border-none p-0 justify-start"
+                        onClick={() => setOpenTrustId(openTrustId === 'payments' ? null : 'payments')}
+                        className={`text-xs font-black tracking-wider text-right flex items-center gap-1 mt-2 hover:underline cursor-pointer bg-transparent border-none p-0 ${isRTL ? 'justify-start text-sky-600 hover:text-sky-700' : 'justify-start text-sky-650 hover:text-sky-800'}`}
                       >
-                        {isRTL ? 'اقرأ المزيد ←' : 'En savoir plus →'}
+                        {openTrustId === 'payments' 
+                          ? (isRTL ? 'إغلاق تفاصيل الدفع ↑' : 'Fermer ↑') 
+                          : (isRTL ? 'اقرأ المزيد عن الضمان والأمان ←' : 'En savoir plus →')}
                       </button>
+
+                      {openTrustId === 'payments' && (
+                        <div className="mt-4 p-4 rounded-2xl bg-sky-50/50 border border-sky-100 text-xs text-sky-950 font-semibold leading-normal animate-fade-in">
+                          {isRTL 
+                            ? 'بفضل شراكتنا الاستراتيجية مع بوابات الدفع الوطنية وسياش والتجاري، فإننا نعتمد نظام الحجز المالي الآمن (Escrow). عند قبولك لعرض، يتم حجز المبلغ بأمان تام ولا يتم تحريره للحرفي إلا بعد مصادقتك الصريحة ورضاك الكامل عن الخدمة المقدمة!' 
+                            : 'Grâce à notre partenaire bancaire sécurisé (conformité CMI), vos fonds sont placés sous séquestre dès l’attribution de la tâche. Ils ne sont versés au prestataire que lorsque vous confirmez la bonne réalisation des travaux.'}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
 
                 {/* 2. RATINGS */}
-                <div className="group p-5 sm:p-6 rounded-3xl bg-slate-50/50 hover:bg-slate-50 border border-slate-150-100 hover:border-emerald-200 transition-all duration-300">
+                <div className="group p-5 sm:p-6 rounded-3xl bg-slate-50/50 hover:bg-slate-50 border border-slate-200 hover:border-emerald-300 transition-all duration-300">
                   <div className={`flex gap-4 items-start ${isRTL ? 'flex-row-reverse' : ''}`}>
                     <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center font-bold shrink-0 shadow-sm group-hover:scale-105 transition-transform">
                       <Star className="w-6 h-6 fill-emerald-600/10" />
                     </div>
-                    <div className="flex flex-col">
+                    <div className="flex flex-col w-full">
                       <h4 className="text-base sm:text-lg font-black text-slate-900" style={{ fontFamily: '"Cairo", sans-serif' }}>
                         {isRTL ? 'تقييمات ومراجعات موثوقة' : 'Profils et avis 100% vérifiés'}
                       </h4>
@@ -783,23 +795,34 @@ export default function HomePage({
                           ? 'اختر الشخص المناسب للمهمة بناءً على التقييمات والمراجعات الحقيقية من المستخدمين الآخرين.' 
                           : 'Trouvez la personne idéale pour vous aider en consultant ses évaluations, photos de réalisations et badges.'}
                       </p>
+                      
                       <button 
-                        onClick={() => alert(isRTL ? 'كل التقييمات الموجودة تأتي حصراً من مستخدمين قاموا فعلياً بتوظيف وسداد مستحقات الحرفي على أرض الواقع، مما يمنع التقييمات المزيفة.' : 'Seuls les utilisateurs réels ayant effectivement employé et payé le membre peuvent laisser une évaluation, garantissant ainsi une transparence totale.')}
-                        className="text-xs font-black text-emerald-600 hover:text-emerald-700 tracking-wider text-right flex items-center gap-1 mt-2 hover:underline cursor-pointer bg-transparent border-none p-0 justify-start"
+                        onClick={() => setOpenTrustId(openTrustId === 'ratings' ? null : 'ratings')}
+                        className={`text-xs font-black tracking-wider text-right flex items-center gap-1 mt-2 hover:underline cursor-pointer bg-transparent border-none p-0 ${isRTL ? 'justify-start text-emerald-600' : 'justify-start text-emerald-600 hover:text-emerald-700'}`}
                       >
-                        {isRTL ? 'اقرأ المزيد ←' : 'En savoir plus →'}
+                        {openTrustId === 'ratings' 
+                          ? (isRTL ? 'إغلاق التفاصيل ↑' : 'Fermer ↑') 
+                          : (isRTL ? 'اقرأ المزيد عن التقييمات الشفافة ←' : 'En savoir plus →')}
                       </button>
+
+                      {openTrustId === 'ratings' && (
+                        <div className="mt-4 p-4 rounded-2xl bg-emerald-50/40 border border-emerald-100 text-xs text-emerald-950 font-semibold leading-normal animate-fade-in">
+                          {isRTL 
+                            ? 'كل تقييم وساعة عمل مسجلة بالمنصة تنبع حصراً من عمليات توظيف حقيقية وسداد مكتمل عبر النظام. لا توجد تقييمات عشوائية أو حسابات وهمية؛ فمعايير النزاهة والشفافية هي قلب مجتمع Tasker.' 
+                            : 'Chaque avis et note provient exclusivement de transactions réelles effectuées sur la plateforme. Notre charte de transparence garantit un écosystème sain, sans faux profils ni évaluations fictives.'}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
 
                 {/* 3. INSURANCE */}
-                <div className="group p-5 sm:p-6 rounded-3xl bg-slate-50/50 hover:bg-slate-50 border border-slate-150-100 hover:border-purple-200 transition-all duration-300">
+                <div className="group p-5 sm:p-6 rounded-3xl bg-slate-50/50 hover:bg-slate-50 border border-slate-200 hover:border-purple-300 transition-all duration-300">
                   <div className={`flex gap-4 items-start ${isRTL ? 'flex-row-reverse' : ''}`}>
                     <div className="w-12 h-12 rounded-2xl bg-purple-100 text-purple-600 flex items-center justify-center font-bold shrink-0 shadow-sm group-hover:scale-105 transition-transform">
                       <ShieldCheck className="w-6 h-6" />
                     </div>
-                    <div className="flex flex-col">
+                    <div className="flex flex-col w-full">
                       <h4 className="text-base sm:text-lg font-black text-slate-900" style={{ fontFamily: '"Cairo", sans-serif' }}>
                         {isRTL ? 'تأمين شامل لراحة البال' : 'Assurance civile & Tranquillité'}
                       </h4>
@@ -808,12 +831,23 @@ export default function HomePage({
                           ? 'نحن نوفر تأمين المسؤولية المدنية للعمال الذين يقومون بمعظم أنشطة المهام المنزلية بالمملكة.' 
                           : 'Nous mettons en place des assurances de responsabilité civile pour couvrir la grande majorité des prestations.'}
                       </p>
+                      
                       <button 
-                        onClick={() => alert(isRTL ? 'توفر المنصة حماية تأمينية للمسؤولية المدنية تغطي الأضرار العرضية للممتلكات لضمان أقصى درجات الأمان والسلامة.' : 'Bénéficiez d’une police d’assurance protégeant les dommages matériels accidentels survenant durant la réalisation de la prestation.')}
-                        className="text-xs font-black text-purple-600 hover:text-purple-700 tracking-wider text-right flex items-center gap-1 mt-2 hover:underline cursor-pointer bg-transparent border-none p-0 justify-start"
+                        onClick={() => setOpenTrustId(openTrustId === 'insurance' ? null : 'insurance')}
+                        className={`text-xs font-black tracking-wider text-right flex items-center gap-1 mt-2 hover:underline cursor-pointer bg-transparent border-none p-0 ${isRTL ? 'justify-start text-purple-600' : 'justify-start text-purple-600 hover:text-purple-700'}`}
                       >
-                        {isRTL ? 'اقرأ المزيد ←' : 'En savoir plus →'}
+                        {openTrustId === 'insurance' 
+                          ? (isRTL ? 'إغلاق التفاصيل ↑' : 'Fermer ↑') 
+                          : (isRTL ? 'اقرأ المزيد عن التغطية التأمينية ←' : 'En savoir plus →')}
                       </button>
+
+                      {openTrustId === 'insurance' && (
+                        <div className="mt-4 p-4 rounded-2xl bg-purple-50/40 border border-purple-100 text-xs text-purple-950 font-semibold leading-normal animate-fade-in">
+                          {isRTL 
+                            ? 'سلامتك وحماية ممتلكاتك هي أولوية قصوى. تضمن منصة Tasker تغطية شاملة للمسؤولية المدنية للأعمال المنزلية المرخصة، مما يقي الطرفين شر أي حوادث أو أضرار عرضية قد تقع أثناء إنجاز الأعمال.' 
+                            : 'Bénéficiez d\'une tranquillité d\'esprit absolue. Tasker couvre les prestations qualifiées par une police d\'assurance responsabilité civile contre les dommages matériels accidentels.'}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -837,7 +871,7 @@ export default function HomePage({
       </section>
 
       {/* 4. FEATURED SERVICES SECTION (Renders the 6 requested services with full Unsplash real images) */}
-      <section className="bg-slate-50/50 py-16 sm:py-20 border-b border-gray-150-300" id="homepage-featured-services-showroom">
+      <section className="bg-slate-50/50 py-16 sm:py-20 border-b border-gray-100" id="homepage-featured-services-showroom">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           
           <div className="text-center max-w-2xl mx-auto mb-10">
@@ -950,7 +984,7 @@ export default function HomePage({
                   <div
                     key={task.id}
                     onClick={() => onTaskSelect(task)}
-                    className="bg-slate-50 hover:bg-white border border-gray-150-300 hover:border-sky-500 rounded-3xl p-5 shadow-xs hover:shadow-md cursor-pointer text-right flex flex-col justify-between min-h-[190px] group transition-all duration-300 transform hover:-translate-y-1"
+                    className="bg-slate-50 hover:bg-white border border-gray-200 hover:border-sky-500 rounded-3xl p-5 shadow-xs hover:shadow-md cursor-pointer text-right flex flex-col justify-between min-h-[190px] group transition-all duration-300 transform hover:-translate-y-1"
                     id={`showroom-task-id-${task.id}`}
                   >
                     <div>

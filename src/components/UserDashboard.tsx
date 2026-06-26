@@ -1,20 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { 
-  collection, 
-  query, 
-  where, 
-  onSnapshot, 
-  doc, 
-  addDoc,
-  getDocs,
-  updateDoc,
-  serverTimestamp,
-  orderBy,
-  limit,
-  setDoc,
-  deleteDoc
-} from 'firebase/firestore';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { useUserTasks } from '../hooks/useUserTasks';
+import { subscribeToWorkers } from '../services/userService';
+import { subscribeToGivenReviews, createReviewService } from '../services/reviewService';
+import { subscribeToRoomMessages, sendMessageService } from '../services/chatService';
+import { createTaskService, acceptOfferService, releaseEscrowService, subscribeToTasks, getTaskOffersOnce } from '../services/taskService';
 import { Task, UserProfile, Offer, Review } from '../types';
 import { LanguageKey, SERVICE_CATEGORIES, RABAT_NEIGHBORHOODS } from '../data/rabatData';
 import { 
@@ -51,7 +41,8 @@ import {
   Phone,
   FileText,
   Upload,
-  Trash2
+  Trash2,
+  Bell
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -63,6 +54,7 @@ interface UserDashboardProps {
   onOpenSettings: () => void;
   onOpenCreateTask?: () => void;
   onToggleToWorker?: () => void;
+  onViewChange?: (view: string) => void;
 }
 
 interface ChatRoom {
@@ -89,34 +81,131 @@ export default function UserDashboard({
   onSelectTask,
   onOpenSettings,
   onOpenCreateTask,
-  onToggleToWorker
+  onToggleToWorker,
+  onViewChange
 }: UserDashboardProps) {
   const isRTL = lang === 'ar';
 
-  // Navigation state within Customer Dashboard
-  // Tabs: 'overview' (Quick actions + status overview), 'tasks' (posted tasks & tracking + escrow), 'workers' (Browse + favorites), 'chat' (Inbox), 'history' (reviews & closed tasks)
-  const [activeTab, setActiveTab] = useState<'overview' | 'tasks' | 'workers' | 'chat' | 'history' | 'files'>('overview');
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // Determine active tab from URL path
+  let activeTab: 'overview' | 'tasks' | 'workers' | 'chat' | 'history' | 'notifications' | 'help' = 'overview';
+  if (location.pathname === '/client/my-requests') {
+    activeTab = 'tasks';
+  } else if (location.pathname.startsWith('/client/chat')) {
+    activeTab = 'chat';
+  } else if (location.pathname.startsWith('/client/workers')) {
+    activeTab = 'workers';
+  } else if (location.pathname.startsWith('/client/history')) {
+    activeTab = 'history';
+  } else if (location.pathname.startsWith('/client/notifications')) {
+    activeTab = 'notifications';
+  } else if (location.pathname.startsWith('/client/help')) {
+    activeTab = 'help';
+  }
+
+  const handleTabClick = (tabId: string) => {
+    if (tabId === 'overview') {
+      navigate('/client/dashboard');
+    } else if (tabId === 'tasks') {
+      navigate('/client/my-requests');
+    } else if (tabId === 'chat') {
+      navigate('/client/chat');
+    } else if (tabId === 'workers') {
+      navigate('/client/workers');
+    } else if (tabId === 'history') {
+      navigate('/client/history');
+    } else if (tabId === 'notifications') {
+      navigate('/client/notifications');
+    } else if (tabId === 'help') {
+      navigate('/client/help');
+    }
+  };
+
+  const setActiveTab = (tabId: 'overview' | 'tasks' | 'workers' | 'chat' | 'history' | 'notifications' | 'help') => {
+    handleTabClick(tabId);
+  };
 
   // Database lists
-  const [myTasks, setMyTasks] = useState<Task[]>([]);
-  const [loadingTasks, setLoadingTasks] = useState(true);
+  const { myTasks, offersMap, loadingTasks } = useUserTasks(user);
   const [allWorkers, setAllWorkers] = useState<UserProfile[]>([]);
   const [loadingWorkers, setLoadingWorkers] = useState(true);
-
-  // User uploaded files state
-  const [myFiles, setMyFiles] = useState<any[]>([]);
-  const [loadingFiles, setLoadingFiles] = useState(false);
-  const [uploadingFile, setUploadingFile] = useState(false);
-  const [fileError, setFileError] = useState<string | null>(null);
-
-  // Offers nested lookup: stores lists of offers by taskId
-  const [offersMap, setOffersMap] = useState<Record<string, Offer[]>>({});
 
   // Favorites (Local Storage backed)
   const [favorites, setFavorites] = useState<string[]>(() => {
     const saved = localStorage.getItem('rabattasker_favorites');
     return saved ? JSON.parse(saved) : [];
   });
+
+  // Notifications Interactive State
+  const [notificationsList, setNotificationsList] = useState<any[]>(() => {
+    const defaultNotifs = [
+      {
+        id: 'n1',
+        titleAr: 'مرحباً بك في منصة Tasker الرباط! 🚀',
+        titleFr: 'Bienvenue sur Tasker Rabat ! 🚀',
+        descAr: 'ابدأ بنشر مهمتك الأولى الآن وتواصل مع أفضل الحرفيين المعتمدين في جميع أحياء الرباط.',
+        descFr: 'Commencez par publier votre première tâche et discutez avec des artisans qualifiés.',
+        timeAr: 'منذ دقيقة',
+        timeFr: 'Il y a 1 min',
+        read: false,
+        type: 'welcome'
+      },
+      {
+        id: 'n2',
+        titleAr: 'تأكيد الحساب وميزات الأمان النشطة 🛡️',
+        titleFr: 'Vérification du compte active 🛡️',
+        descAr: 'تم تفعيل حسابك كعميل موثوق. صفقاتك والضمانات المالية (Escrow) محمية بالكامل.',
+        descFr: 'Votre compte client est validé et entièrement sécurisé avec le système d\'Escrow.',
+        timeAr: 'منذ ساعتين',
+        timeFr: 'Il y a 2h',
+        read: false,
+        type: 'security'
+      },
+      {
+        id: 'n3',
+        titleAr: 'تحديث الدليل المهني لمدينة الرباط 📍',
+        titleFr: 'Mise à jour de l\'annuaire de Rabat 📍',
+        descAr: 'تم إدراج أكثر من 50 حرفياً معتمداً جديداً في مجالات السباكة والتنظيف والصيانة المنزلية هذا الأسبوع.',
+        descFr: 'Plus de 50 nouveaux artisans certifiés ont été ajoutés à notre annuaire cette semaine.',
+        timeAr: 'منذ يوم',
+        timeFr: 'Hier',
+        read: true,
+        type: 'announcement'
+      }
+    ];
+    const saved = localStorage.getItem('rabattasker_notifications');
+    return saved ? JSON.parse(saved) : defaultNotifs;
+  });
+
+  const saveNotifications = (list: any[]) => {
+    setNotificationsList(list);
+    localStorage.setItem('rabattasker_notifications', JSON.stringify(list));
+  };
+
+  const handleMarkAsRead = (id: string) => {
+    const updated = notificationsList.map(n => n.id === id ? { ...n, read: true } : n);
+    saveNotifications(updated);
+  };
+
+  const handleMarkAllAsRead = () => {
+    const updated = notificationsList.map(n => ({ ...n, read: true }));
+    saveNotifications(updated);
+  };
+
+  const handleDeleteNotification = (id: string) => {
+    const updated = notificationsList.filter(n => n.id !== id);
+    saveNotifications(updated);
+  };
+
+  // Help/FAQ section interactive states
+  const [activeFaqIndex, setActiveFaqIndex] = useState<number | null>(null);
+  
+  // Support ticket form state
+  const [supportCategory, setSupportCategory] = useState('general');
+  const [supportMessage, setSupportMessage] = useState('');
+  const [supportSuccess, setSupportSuccess] = useState(false);
 
   // Chat system state
   const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]);
@@ -125,6 +214,12 @@ export default function UserDashboard({
   const [newMessageText, setNewMessageText] = useState('');
   const [loadingRooms, setLoadingRooms] = useState(true);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Guards to prevent double clicks and duplicate operations
+  const quickPostRef = useRef(false);
+  const acceptOfferRef = useRef(false);
+  const completeTaskRef = useRef(false);
+  const postReviewRef = useRef(false);
 
   // Quick Inline Post task state
   const [quickTitle, setQuickTitle] = useState('');
@@ -157,82 +252,12 @@ export default function UserDashboard({
     setQuickDueDate(tomorrow.toISOString().split('T')[0]);
   }, []);
 
-  // Real-time User Files Listener
-  useEffect(() => {
-    if (!user) return;
-    setLoadingFiles(true);
-    const q = query(collection(db, 'files'), where('userId', '==', user.uid));
-    const unsub = onSnapshot(q, (snap) => {
-      const list: any[] = [];
-      snap.forEach((d) => {
-        list.push({ id: d.id, ...d.data() });
-      });
-      setMyFiles(list);
-      setLoadingFiles(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'files');
-      setLoadingFiles(false);
-    });
-    return () => unsub();
-  }, [user]);
-
-  // 1. Fetch current customer's posted tasks
-  useEffect(() => {
-    if (!user) return;
-    const q = query(
-      collection(db, 'tasks'), 
-      where('posterId', '==', user.uid)
-    );
-    const unsub = onSnapshot(q, (snap) => {
-      const list: Task[] = [];
-      snap.forEach((docSnap) => {
-        list.push({ id: docSnap.id, ...docSnap.data() } as Task);
-      });
-      // Sort tasks by updated/created date
-      list.sort((a,b) => {
-        const timeA = a.createdAt?.seconds || 0;
-        const timeB = b.createdAt?.seconds || 0;
-        return timeB - timeA;
-      });
-      setMyTasks(list);
-      setLoadingTasks(false);
-
-      // Setup nested offers listeners for each of these tasks
-      list.forEach((t) => {
-        const offersRef = collection(db, 'tasks', t.id, 'offers');
-        onSnapshot(offersRef, (offerSnap) => {
-          const offersList: Offer[] = [];
-          offerSnap.forEach((oDoc) => {
-            offersList.push({ id: oDoc.id, ...oDoc.data() } as Offer);
-          });
-          setOffersMap(prev => ({
-            ...prev,
-            [t.id]: offersList
-          }));
-        }, (err) => {
-          console.error(`Failed to listen to offers for task ${t.id}`, err);
-        });
-      });
-
-    }, (err) => {
-      console.error("Failed to load posted tasks", err);
-      setLoadingTasks(false);
-    });
-    return () => unsub();
-  }, [user]);
-
   // 2. Fetch all workers in Rabat
   useEffect(() => {
-    const q = query(collection(db, 'users'), where('isTasker', '==', true));
-    const unsub = onSnapshot(q, (snap) => {
-      const list: UserProfile[] = [];
-      snap.forEach((d) => {
-        list.push({ uid: d.id, ...d.data() } as UserProfile);
-      });
+    const unsub = subscribeToWorkers((list) => {
       setAllWorkers(list);
       setLoadingWorkers(false);
     }, (err) => {
-      console.error("Browse workers fetch failed", err);
       setLoadingWorkers(false);
     });
     return () => unsub();
@@ -241,16 +266,10 @@ export default function UserDashboard({
   // 3. Fetch reviews given by this user
   useEffect(() => {
     if (!user) return;
-    const q = query(collection(db, 'reviews'), where('reviewerId', '==', user.uid));
-    const unsub = onSnapshot(q, (snap) => {
-      const list: Review[] = [];
-      snap.forEach((d) => {
-        list.push({ id: d.id, ...d.data() } as Review);
-      });
+    const unsub = subscribeToGivenReviews(user.uid, (list) => {
       setMyGivenReviews(list);
       setLoadingReviews(false);
     }, (err) => {
-      console.error(err);
       setLoadingReviews(false);
     });
     return () => unsub();
@@ -261,30 +280,24 @@ export default function UserDashboard({
     if (!user) return;
     setLoadingRooms(true);
 
-    const q = query(collection(db, 'tasks'));
-    const unsub = onSnapshot(q, async (snap) => {
+    const unsub = subscribeToTasks(async (tasksList) => {
       const rooms: ChatRoom[] = [];
       const promises: Promise<any>[] = [];
 
-      snap.forEach((taskDoc) => {
-        const taskObj = taskDoc.data() as Task;
-        taskObj.id = taskDoc.id;
-
+      tasksList.forEach((taskObj) => {
         // I am the Employer/Poster
         if (taskObj.posterId === user.uid) {
-          const offersRef = collection(db, 'tasks', taskDoc.id, 'offers');
-          const p = getDocs(offersRef).then((offSnap) => {
-            offSnap.forEach((offDoc) => {
-              const offerObj = offDoc.data() as Offer;
+          const p = getTaskOffersOnce(taskObj.id).then((offersList) => {
+            offersList.forEach((offerObj) => {
               rooms.push({
-                id: `${taskDoc.id}_${offerObj.taskerId}`,
-                taskId: taskDoc.id,
+                id: `${taskObj.id}_${offerObj.taskerId}`,
+                taskId: taskObj.id,
                 taskTitle: taskObj.title,
                 otherPartyId: offerObj.taskerId,
                 otherPartyName: offerObj.taskerName
               });
             });
-          });
+          }).catch(err => console.warn("Load room offers error", err));
           promises.push(p);
         }
       });
@@ -314,124 +327,71 @@ export default function UserDashboard({
   useEffect(() => {
     if (!activeRoom) return;
 
-    const messagesRef = collection(db, 'chatMessages');
-    const q = query(
-      messagesRef, 
-      where('roomId', '==', activeRoom.id), 
-      orderBy('createdAt', 'asc'), 
-      limit(100)
-    );
-
-    const unsub = onSnapshot(q, (snap) => {
-      const chatMsgs: ChatMessage[] = [];
-      snap.forEach((d) => {
-        chatMsgs.push({ id: d.id, ...d.data() } as ChatMessage);
-      });
+    const unsub = subscribeToRoomMessages(activeRoom.id, (chatMsgs) => {
       setMessages(chatMsgs);
       
       setTimeout(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       }, 50);
-    }, (err) => {
-      console.warn("Messages retrieval status: OK fallback", err);
     });
 
     return () => unsub();
   }, [activeRoom]);
-
-  // File uploads processing helper
-  const handleUploadFile = async (file: File) => {
-    if (file.size > 2.5 * 1024 * 1024) {
-      setFileError(isRTL ? 'حجم الملف يتجاوز الحد الأقصى المسموح به (٢.٥ ميجابايت)' : 'Le fichier dépasse la limite de 2.5 Mo.');
-      return;
-    }
-    setFileError(null);
-    setUploadingFile(true);
-
-    try {
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const base64String = reader.result as string;
-        try {
-          const fileId = 'file_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
-          await setDoc(doc(db, 'files', fileId), {
-            userId: user.uid,
-            fileName: file.name,
-            fileUrl: base64String,
-            fileType: file.type || 'application/octet-stream',
-            fileSize: file.size,
-            createdAt: serverTimestamp()
-          });
-          setUploadingFile(false);
-        } catch (dbErr) {
-          handleFirestoreError(dbErr, OperationType.WRITE, 'files/' + file.name);
-          setUploadingFile(false);
-        }
-      };
-      reader.onerror = () => {
-        setFileError(isRTL ? 'حدث خطأ متوقع أثناء قراءة الملف.' : 'Erreur de lecture du fichier.');
-        setUploadingFile(false);
-      };
-      reader.readAsDataURL(file);
-    } catch (err: any) {
-      setFileError(err.message || 'Error occurred');
-      setUploadingFile(false);
-    }
-  };
 
   // Handle Send Chat message
   const handleSendChatMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !activeRoom || !newMessageText.trim()) return;
 
-    const messagePayload = {
-      roomId: activeRoom.id,
-      senderId: user.uid,
-      senderName: userProfile?.displayName || user.displayName || 'الزبون (طالب الخدمة)',
-      text: newMessageText.trim(),
-      createdAt: serverTimestamp()
-    };
-
+    const currentText = newMessageText.trim();
     try {
       setNewMessageText('');
-      await addDoc(collection(db, 'chatMessages'), messagePayload);
-    } catch (err) {
-      console.error("Error writing message to Firestore", err);
+      await sendMessageService({
+        roomId: activeRoom.id,
+        senderId: user.uid,
+        senderName: userProfile?.displayName || user.displayName || 'الزبون (طالب الخدمة)',
+        text: currentText
+      });
+    } catch (err: any) {
+      console.error("Error sending chat message via secure API:", err);
+      alert(err.message || 'Chat service is temporarily congested.');
     }
   };
 
   // Quick Action: Post new Task instantly
   const handleQuickPost = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (quickPostRef.current || postingQuickTask) return;
     if (!user) return;
     if (!quickTitle.trim() || !quickDesc.trim() || quickBudget <= 0) {
       alert(isRTL ? 'الرجاء ملء حقول العنوان والوصف وقيمة الميزانية أولاً!' : 'Veuillez remplir le titre, la description et le budget !');
       return;
     }
 
-    setPostingQuickTask(true);
     try {
+      quickPostRef.current = true;
+      setPostingQuickTask(true);
+      
+      const taskId = 'task_' + Math.random().toString(36).substr(2, 9);
       const taskPayload = {
+        id: taskId,
         title: quickTitle,
         description: quickDesc,
         budget: Number(quickBudget),
         category: quickCategory,
         location: quickNeighborhood,
         dueDate: quickDueDate || new Date().toISOString().split('T')[0],
-        status: 'held',
+        status: 'open', // Create as 'open' so taskers can bid
         posterId: user.uid,
         posterName: userProfile?.displayName || user.displayName || 'أحد سكان الرباط',
         offersCount: 0,
-        isEscrowFunded: true,
-        escrowStatus: 'held',
-        escrowAmount: Number(quickBudget),
-        escrowReleased: false,
-        depositTransactionId: 'PZ-ESCR-' + Math.floor(100000 + Math.random() * 900000),
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
+        isEscrowFunded: false,
+        escrowStatus: 'none',
+        escrowAmount: 0,
+        escrowReleased: false
       };
 
-      await addDoc(collection(db, 'tasks'), taskPayload);
+      await createTaskService(taskPayload, user.uid);
       
       // Clear inputs
       setQuickTitle('');
@@ -439,10 +399,12 @@ export default function UserDashboard({
       setQuickBudget(200);
       setPostingSuccess(true);
       setTimeout(() => setPostingSuccess(false), 4000);
-    } catch (err) {
-      console.error("Failed to post quick task", err);
+    } catch (err: any) {
+      console.error("Failed to post quick task securely via API:", err);
+      alert(err.message || 'Secure task policy verification failed.');
     } finally {
       setPostingQuickTask(false);
+      quickPostRef.current = false;
     }
   };
 
@@ -484,6 +446,7 @@ export default function UserDashboard({
 
   // Accept Offer System
   const handleAcceptOffer = async (task: Task, offer: Offer, siblingOffers: Offer[]) => {
+    if (acceptOfferRef.current) return;
     if (!user || task.posterId !== user.uid) return;
 
     const confirmText = isRTL 
@@ -493,37 +456,21 @@ export default function UserDashboard({
     if (!window.confirm(confirmText)) return;
 
     try {
-      // 1. Update task to assigned and record tasker info
-      const taskRef = doc(db, 'tasks', task.id);
-      await updateDoc(taskRef, {
-        status: 'assigned',
-        taskerId: offer.taskerId,
-        taskerName: offer.taskerName,
-        budget: offer.amount, // update task budget to the agreed accepted amount
-        escrowFunded: true, // mark escrow as funded
-        updatedAt: serverTimestamp()
-      });
-
-      // 2. Update status of the accepted offer
-      const offerRef = doc(db, 'tasks', task.id, 'offers', offer.id);
-      await updateDoc(offerRef, { status: 'accepted' });
-
-      // 3. Mark sibling offers as declined
-      for (const other of siblingOffers) {
-        if (other.id !== offer.id) {
-          const sisterRef = doc(db, 'tasks', task.id, 'offers', other.id);
-          await updateDoc(sisterRef, { status: 'declined' });
-        }
-      }
+      acceptOfferRef.current = true;
+      await acceptOfferService(task.id, offer.id, user.uid);
 
       alert(isRTL ? 'تهانينا! تم تعيين الحرفي وتأمين الميزانية في نظام الضمان بنجاح 🔒.' : 'Succès! Prestataire désigné et dépôt Escrow sécurisé 🔒.');
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      alert(isRTL ? `فشل التعيين: ${err.message}` : `Échec d'assignation: ${err.message}`);
+    } finally {
+      acceptOfferRef.current = false;
     }
   };
 
   // Change status of task to Completed & Prompt instant rating feedback
   const handleCompleteTask = async (task: Task) => {
+    if (completeTaskRef.current) return;
     if (!user || task.posterId !== user.uid) return;
 
     const confirmText = isRTL 
@@ -533,29 +480,21 @@ export default function UserDashboard({
     if (!window.confirm(confirmText)) return;
 
     try {
-      const res = await fetch('/api/tasks/release-escrow', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          taskId: task.id,
-          userUid: user.uid
-        })
-      });
-      
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to release escrow via safe Cloud Functions.');
-      }
+      completeTaskRef.current = true;
+      await releaseEscrowService(task.id, user.uid);
       
       alert(isRTL ? 'رائع! تم تحرير وإرسال المستحقات لحساب الحرفي بنجاح عبر بوابة الدفع الآمنة. يرجى كتابة تقييم قصير له.' : 'Fascinant ! Fonds d’Escrow libérés via le serveur Payzone. Veuillez évaluer le prestataire.');
     } catch (err: any) {
       console.error(err);
       alert(isRTL ? `فشل الإفراج عن الضمان: ${err.message}` : `Échec de libération d'Escrow: ${err.message}`);
+    } finally {
+      completeTaskRef.current = false;
     }
   };
 
   // Submitting review feedback for worker
   const handlePostReview = async (taskId: string, workerId: string, workerName: string) => {
+    if (postReviewRef.current || submittingReviewId !== null) return;
     const stars = ratingInput[taskId] || 5;
     const comment = commentInput[taskId] || '';
 
@@ -564,36 +503,28 @@ export default function UserDashboard({
       return;
     }
 
-    setSubmittingReviewId(taskId);
     try {
-      const reviewPayload = {
+      postReviewRef.current = true;
+      setSubmittingReviewId(taskId);
+      await createReviewService({
         taskId,
-        reviewerId: user.uid,
-        reviewerName: userProfile?.displayName || user.displayName || 'أحد الزبائن بمهمات الرباط',
-        revieweeId: workerId,
         rating: Number(stars),
         comment: comment.trim(),
-        createdAt: serverTimestamp()
-      };
-
-      await addDoc(collection(db, 'reviews'), reviewPayload);
-
-      // Mark the task as fully reviewed
-      const taskRef = doc(db, 'tasks', taskId);
-      await updateDoc(taskRef, {
-        isReviewed: true,
-        updatedAt: serverTimestamp()
+        userUid: user.uid,
+        reviewerName: userProfile?.displayName || user.displayName || 'أحد الزبائن بمهمات الرباط'
       });
 
       // Clear review form fields
       setRatingInput(prev => ({ ...prev, [taskId]: 5 }));
       setCommentInput(prev => ({ ...prev, [taskId]: '' }));
 
-      alert(isRTL ? 'شكراً لك على تقييم جودة الخدمة! تساهم رأيك في تحسين جودة وتكامل مجتمعتنا.' : 'Merci pour votre évaluation ! contribution enregistrée.');
-    } catch (err) {
+      alert(isRTL ? 'شكراً لك على تقييم جودة الخدمة! يساهم رأيك في تحسين جودة وتكامل مجتمعتنا.' : 'Merci pour votre évaluation ! contribution enregistrée.');
+    } catch (err: any) {
       console.error(err);
+      alert(isRTL ? `فشل إرسال التقييم: ${err.message}` : `Échec d'évaluation: ${err.message}`);
     } finally {
       setSubmittingReviewId(null);
+      postReviewRef.current = false;
     }
   };
 
@@ -632,17 +563,30 @@ export default function UserDashboard({
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-10 flex flex-col md:flex-row items-center justify-between gap-6 relative z-10">
           
           <div className="flex items-center gap-5 text-center md:text-right flex-col md:flex-row">
-            <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-3xl bg-white text-indigo-700 flex items-center justify-center font-black text-3xl shadow-xl border-4 border-white/20">
-              {userProfile?.displayName ? userProfile.displayName.charAt(0) : '?'}
-            </div>
+            <button
+              onClick={onOpenSettings}
+              className="w-16 h-16 sm:w-20 sm:h-20 rounded-3xl bg-white text-indigo-700 flex items-center justify-center font-black text-3xl shadow-xl border-4 border-white/20 uppercase cursor-pointer hover:scale-105 active:scale-95 transition-all duration-200"
+              title={isRTL ? 'إعدادات الحساب' : 'Paramètres du compte'}
+            >
+              {(userProfile?.displayName || user?.displayName || user?.email || 'T').charAt(0)}
+            </button>
             
             <div className="flex flex-col gap-1.5 md:items-start items-center">
               <div className="flex flex-wrap items-center gap-2 justify-center">
                 <h2 className="text-xl sm:text-2xl font-black tracking-tight">{userProfile?.displayName || user.displayName || 'مستخدم متميز'}</h2>
-                <span className="bg-emerald-500 text-white text-[10px] px-2.5 py-1 rounded-full font-bold flex items-center gap-1 shadow-xs animate-pulse">
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>{isRTL ? 'حساب زبون مؤمن' : 'Client Sécurisé'}</span>
-                </span>
+                {user && (user.uid === 'sDCii92rV7fKTvvDgWTQCLKxwJr1' || user.email === 'cryptomourad1992@gmail.com' || userProfile?.role === 'admin' || userProfile?.isSuperAdmin) ? (
+                  <button
+                    onClick={() => onViewChange?.('admin')}
+                    className="bg-purple-650 hover:bg-purple-750 text-white text-[11px] px-3.5 py-1.5 rounded-full font-black flex items-center gap-1.5 shadow-md cursor-pointer animate-pulse shrink-0 border border-purple-500 hover:scale-102 active:scale-95 transition-all"
+                  >
+                    👑 <span>{isRTL ? 'بوابة الإشراف العام الإدارية ⚡' : 'Portal Admin General ⚡'}</span>
+                  </button>
+                ) : (
+                  <span className="bg-emerald-500 text-white text-[10px] px-2.5 py-1 rounded-full font-bold flex items-center gap-1 shadow-xs animate-pulse">
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>{isRTL ? 'حساب زبون مؤمن' : 'Client Sécurisé'}</span>
+                  </span>
+                )}
               </div>
               <p className="text-xs text-blue-100 max-w-md font-medium">
                 {userProfile?.bio || (isRTL ? 'أنت في الصفحة الخاصة بطالب الخدمة. انشر مهامك، وتواصل مع الحرفيين المعتمدين في الرباط.' : 'Espace de commande. Postez des missions et négociez en direct avec les experts.')}
@@ -658,40 +602,6 @@ export default function UserDashboard({
           </div>
 
           <div className="flex flex-wrap items-center gap-2 shrink-0">
-            {onToggleToWorker && (
-              <button
-                onClick={onToggleToWorker}
-                className="bg-white hover:bg-slate-50 text-indigo-800 font-extrabold text-xs sm:text-xs px-5 py-3.5 rounded-2xl transition-all cursor-pointer shadow-md flex items-center gap-2 active:scale-95"
-              >
-                <Wrench className="w-4 h-4 text-indigo-600 shrink-0" />
-                <span>{isRTL ? 'التبديل إلى لوحة المستقل (مقدم الخدمة)' : 'Mode Prestataire (Gagner de l’argent)'}</span>
-              </button>
-            )}
-
-            <button
-              onClick={() => {
-                if (onOpenCreateTask) {
-                  onOpenCreateTask();
-                } else {
-                  setActiveTab('overview');
-                  setTimeout(() => {
-                    document.getElementById('quick-post-section')?.scrollIntoView({ behavior: 'smooth' });
-                  }, 100);
-                }
-              }}
-              className="bg-emerald-550 hover:bg-emerald-600 text-white font-black text-xs sm:text-sm px-6 py-3.5 rounded-2xl transition-all cursor-pointer shadow-md shadow-emerald-500/10 flex items-center gap-2 active:scale-95"
-            >
-              <Plus className="w-5 h-5 shrink-0" />
-              <span>{isRTL ? 'انشر مهمة جديدة للبدء 🚀' : 'Poster une tâche 🚀'}</span>
-            </button>
-            
-            <button
-              onClick={onOpenSettings}
-              className="bg-white/15 hover:bg-white/20 text-white font-bold text-xs p-3.5 rounded-2xl transition-all cursor-pointer border border-white/10"
-              title={isRTL ? 'تعديل الإعدادات' : 'Paramètres'}
-            >
-              <Settings className="w-4 h-4" />
-            </button>
           </div>
 
         </div>
@@ -706,9 +616,10 @@ export default function UserDashboard({
                 { id: 'overview', labelAr: 'موجز السيطرة ولوحة التحكم', labelFr: 'Accueil & Post', icon: Sparkles },
                 { id: 'tasks', labelAr: 'مهامي وتتبع العروض والمستحقات', labelFr: 'Tâches & Escrow', icon: Clock },
                 { id: 'workers', labelAr: 'دليل الحرفيين والمفضلين', labelFr: 'Artisans & Favoris', icon: User },
-                { id: 'chat', labelAr: 'الدرشة والرسائل النشطة', labelFr: 'Discussions', icon: MessageSquare },
-                { id: 'history', labelAr: 'المهام المؤرشفة والتوصيات', labelFr: 'Historique', icon: CheckCircle },
-                { id: 'files', labelAr: 'مستنداتي وملفاتي المرفوعة', labelFr: 'Mes documents', icon: FileText }
+                { id: 'chat', labelAr: 'الرسائل والمحادثات', labelFr: 'Messages', icon: MessageSquare },
+                { id: 'notifications', labelAr: 'التنبيهات والإشعارات', labelFr: 'Notifications', icon: Bell },
+                { id: 'help', labelAr: 'مركز المساعدة والدعم', labelFr: 'Help & Support', icon: HelpCircle },
+                { id: 'history', labelAr: 'المهام المؤرشفة والتوصيات', labelFr: 'Historique', icon: CheckCircle }
               ].map((tab) => {
                 const isActive = activeTab === tab.id;
                 return (
@@ -1166,6 +1077,268 @@ export default function UserDashboard({
           </div>
         )}
 
+        {/* NOTIFICATIONS TAB: INTERACTIVE ALERT & ACTIVITY LOGS */}
+        {activeTab === 'notifications' && (
+          <div className="flex flex-col gap-6 animate-fade-in" id="customer-tab-notifications">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b pb-4 border-gray-200/60 text-right gap-4">
+              <div className="flex flex-col gap-0.5">
+                <h3 className="text-sm font-black text-slate-900">{isRTL ? 'مركز التنبيهات والإشعارات' : 'Centre de Notifications'}</h3>
+                <span className="text-[10px] text-gray-455 font-bold">
+                  {isRTL ? 'تابع آخر مستجدات طلباتك، العروض الجديدة والتحديثات الخاصة بأمان حسابك.' : 'Suivez l\'activité de vos offres, messages et mises à jour de sécurité.'}
+                </span>
+              </div>
+              {notificationsList.some(n => !n.read) && (
+                <button
+                  onClick={handleMarkAllAsRead}
+                  className="bg-blue-50 hover:bg-blue-100 text-blue-700 font-extrabold text-xs px-4 py-2 rounded-xl transition-all cursor-pointer self-start sm:self-center"
+                >
+                  {isRTL ? 'تعيين الكل كمقروء' : 'Tout marquer comme lu'}
+                </button>
+              )}
+            </div>
+
+            {notificationsList.length === 0 ? (
+              <div className="bg-white p-12 text-center rounded-3xl border border-gray-150 flex flex-col items-center gap-3 justify-center">
+                <div className="p-4 bg-gray-50 text-gray-300 rounded-2xl">
+                  <Bell className="w-8 h-8" />
+                </div>
+                <span className="text-xs font-black text-slate-800">{isRTL ? 'صندوق التنبيهات فارغ' : 'Aucune notification'}</span>
+                <p className="text-[10px] text-gray-400 max-w-xs leading-relaxed font-bold">
+                  {isRTL ? 'لا توجد أي إشعارات جديدة في الوقت الحالي. سنقوم بتنبيهك بمجرد حدوث أي جديد.' : 'Tout est à jour ! Vous recevrez une alerte en cas de nouvelle activité.'}
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {notificationsList.map((notif) => {
+                  return (
+                    <div
+                      key={notif.id}
+                      className={`p-4 sm:p-5 rounded-2xl border transition-all duration-200 flex items-start gap-4 text-right ${
+                        notif.read
+                          ? 'bg-white border-gray-150/80 shadow-xs'
+                          : 'bg-blue-50/40 border-blue-100 shadow-sm'
+                      }`}
+                    >
+                      {/* Left dot badge */}
+                      <div className="flex items-center shrink-0 pt-1">
+                        {!notif.read && (
+                          <span className="w-2.5 h-2.5 bg-blue-600 rounded-full animate-pulse" />
+                        )}
+                      </div>
+
+                      {/* Icon */}
+                      <div className={`p-2.5 rounded-xl shrink-0 ${
+                        notif.type === 'welcome' ? 'bg-indigo-50 text-indigo-650' :
+                        notif.type === 'security' ? 'bg-emerald-50 text-emerald-650' :
+                        'bg-amber-50 text-amber-650'
+                      }`}>
+                        {notif.type === 'welcome' && <Sparkles className="w-4 h-4" />}
+                        {notif.type === 'security' && <ShieldCheck className="w-4 h-4" />}
+                        {notif.type === 'announcement' && <AlertCircle className="w-4 h-4" />}
+                      </div>
+
+                      {/* Content */}
+                      <div className="flex-1 min-w-0 flex flex-col gap-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <h4 className="text-xs sm:text-sm font-black text-slate-900 truncate">
+                            {isRTL ? notif.titleAr : notif.titleFr}
+                          </h4>
+                          <span className="text-[9px] font-bold text-gray-400 whitespace-nowrap">
+                            {isRTL ? notif.timeAr : notif.timeFr}
+                          </span>
+                        </div>
+                        <p className="text-[10px] sm:text-xs text-gray-500 font-medium leading-relaxed">
+                          {isRTL ? notif.descAr : notif.descFr}
+                        </p>
+                      </div>
+
+                      {/* Action buttons */}
+                      <div className="flex items-center gap-1.5 shrink-0 self-center">
+                        {!notif.read && (
+                          <button
+                            onClick={() => handleMarkAsRead(notif.id)}
+                            className="p-1.5 hover:bg-white text-gray-400 hover:text-blue-600 rounded-lg border border-transparent hover:border-gray-100 transition-all cursor-pointer"
+                            title={isRTL ? 'تحديد كمقروء' : 'Marquer comme lu'}
+                          >
+                            <Check className="w-4 h-4" />
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleDeleteNotification(notif.id)}
+                          className="p-1.5 hover:bg-white text-gray-400 hover:text-rose-600 rounded-lg border border-transparent hover:border-gray-100 transition-all cursor-pointer"
+                          title={isRTL ? 'حذف الإشعار' : 'Supprimer'}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* HELP & SUPPORT TAB: FAQS & CONTACT FORM */}
+        {activeTab === 'help' && (
+          <div className="flex flex-col gap-6 animate-fade-in" id="customer-tab-help">
+            <div className="flex items-center justify-between border-b pb-3 border-gray-200/60 text-right">
+              <div className="flex flex-col gap-0.5">
+                <h3 className="text-sm font-black text-slate-900">{isRTL ? 'مركز المساعدة والدعم الفني' : 'Aide & Support Client'}</h3>
+                <span className="text-[10px] text-gray-455 font-bold">
+                  {isRTL ? 'نحن هنا لمساعدتك! تصفح الأسئلة الشائعة أو أرسل رسالة مباشرة لفريق دعم الرباط.' : 'Trouvez des réponses rapides ou contactez notre équipe d\'assistance dédiée.'}
+                </span>
+              </div>
+            </div>
+
+            {/* Support Bento Grid Layout */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              
+              {/* Left 2 columns: FAQ toggles */}
+              <div className="lg:col-span-2 flex flex-col gap-4">
+                <h4 className="text-xs font-black text-slate-800 flex items-center gap-1.5 justify-end">
+                  <span>{isRTL ? 'الأسئلة الشائعة وإجاباتها' : 'Questions Fréquentes'}</span>
+                  <HelpCircle className="w-4 h-4 text-blue-600" />
+                </h4>
+
+                <div className="flex flex-col gap-2.5">
+                  {[
+                    {
+                      qAr: 'كيف يمكنني نشر مهمة جديدة في الرباط؟',
+                      qFr: 'Comment puis-je poster une nouvelle tâche à Rabat ?',
+                      aAr: 'من لوحة التحكم (الرئيسية)، انقر على "نشر مهمة جديدة"، وحدد المسمى الوظيفي والوصف الدقيق، مع اختيار الحي والميزانية المقترحة بالدرهم المغربي. سيتلقى الحرفيون المعتمدون في الرباط إشعاراً فورياً لتقديم عروض أسعارهم.',
+                      aFr: 'Depuis l\'onglet d\'accueil, cliquez sur "Créer une tâche". Décrivez précisément votre besoin, choisissez le quartier de Rabat et le budget estimé en DH. Les artisans recevront une notification pour vous proposer des tarifs.'
+                    },
+                    {
+                      qAr: 'كيف أضمن سلامة أموالي وحقوقي المالية؟',
+                      qFr: 'Comment fonctionne la garantie de paiement (Escrow) ?',
+                      aAr: 'عند إسناد المهمة لحرفي، يتم حجز مبلغ الميزانية بأمان داخل نظام الضمان بالمنصة (Escrow). لا يتم تحرير المبلغ وتحويله لمحفظة الحرفي إلا بعد أن تؤكد بنفسك انتهاء العمل بنجاح وبشكل يرضيك تماماً.',
+                      aFr: 'Une fois l\'offre acceptée, le montant est sécurisé par la plateforme (Escrow). Le prestataire n\'est payé qu\'une fois que vous confirmez sur votre tableau de bord que le travail est entièrement terminé.'
+                    },
+                    {
+                      qAr: 'هل الحرفيون المتواجدون بالمنصة معتمدون؟',
+                      qFr: 'Les prestataires de services sont-ils certifiés ?',
+                      aAr: 'نعم! يخضع جميع الحرفيين الذين يحملون شارة "PRO" لعملية تحقق مهني صارمة تشمل مراجعة بطاقة الهوية الوطنية والشهادات المهنية، إلى جانب تقييمات العملاء الحقيقية السابقة لضمان الجودة والأمان.',
+                      aFr: 'Absolument. Les artisans affichant le badge "PRO" ont subi une vérification stricte d\'identité et de compétences. De plus, les avis clients vous permettent de choisir en toute confiance.'
+                    },
+                    {
+                      qAr: 'كيف يمكنني إلغاء مهمة أو استرجاع الأموال؟',
+                      qFr: 'Comment annuler une mission ou demander un remboursement ?',
+                      aAr: 'إذا لم يبدأ العمل أو حدث خلاف بين الطرفين، يمكنك التواصل مباشرة مع خدمة العملاء من خلال نموذج الدعم الفني بالأسفل، وسيقوم المشرفون بمراجعة الحالة وإعادة حجز الضمان إلى محفظتك على الفور.',
+                      aFr: 'Si le travail n\'a pas commencé ou en cas de litige, vous pouvez contacter le support via le formulaire ci-dessous. Un modérateur étudiera la demande pour annuler et rembourser la transaction.'
+                    }
+                  ].map((faq, index) => {
+                    const isOpen = activeFaqIndex === index;
+                    return (
+                      <div
+                        key={index}
+                        className="bg-white border border-gray-150 rounded-2xl overflow-hidden transition-all duration-300"
+                      >
+                        <button
+                          onClick={() => setActiveFaqIndex(isOpen ? null : index)}
+                          className="w-full p-4.5 flex items-center justify-between text-right cursor-pointer hover:bg-slate-50 transition-colors"
+                        >
+                          <ChevronRight className={`w-4 h-4 text-gray-400 transition-transform duration-300 ${isOpen ? 'rotate-90' : 'rotate-0'}`} />
+                          <span className="text-xs sm:text-sm font-black text-slate-800">
+                            {isRTL ? faq.qAr : faq.qFr}
+                          </span>
+                        </button>
+                        {isOpen && (
+                          <div className="px-4.5 pb-4.5 pt-1 text-[10px] sm:text-xs text-gray-500 font-bold leading-relaxed border-t border-gray-100 bg-slate-50/50">
+                            {isRTL ? faq.aAr : faq.aFr}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Right column: Interactive Support Form */}
+              <div className="bg-white p-5 rounded-3xl border border-gray-150 shadow-xs flex flex-col gap-4 text-right">
+                <h4 className="text-xs font-black text-slate-800 flex items-center gap-1.5 justify-end">
+                  <span>{isRTL ? 'تذكرة دعم فني جديدة' : 'Ouvrir un ticket support'}</span>
+                  <Phone className="w-4 h-4 text-blue-600" />
+                </h4>
+
+                {supportSuccess ? (
+                  <div className="p-5 bg-emerald-50 border border-emerald-100 rounded-2xl flex flex-col items-center gap-3 text-center my-4 animate-fade-in">
+                    <div className="p-2.5 bg-emerald-100 text-emerald-700 rounded-full">
+                      <Check className="w-5 h-5" />
+                    </div>
+                    <span className="text-xs font-black text-slate-800">
+                      {isRTL ? 'تم الإرسال بنجاح' : 'Envoyé avec succès'}
+                    </span>
+                    <p className="text-[10px] text-gray-550 leading-relaxed font-bold">
+                      {isRTL 
+                        ? 'شكراً لك! تم تسليم رسالتك لفريق دعم الرباط بنجاح. سنقوم بالرد عليك عبر البريد الإلكتروني خلال 24 ساعة كحد أقصى.' 
+                        : 'Merci ! Notre équipe à Rabat a bien reçu votre demande et vous répondra sous 24 heures.'}
+                    </p>
+                    <button
+                      onClick={() => {
+                        setSupportSuccess(false);
+                        setSupportMessage('');
+                      }}
+                      className="mt-2 text-[10px] bg-white hover:bg-gray-55 text-gray-650 border border-gray-200 font-black px-4.5 py-1.5 rounded-xl transition-all cursor-pointer"
+                    >
+                      {isRTL ? 'إرسال تذكرة أخرى' : 'Envoyer un autre message'}
+                    </button>
+                  </div>
+                ) : (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      if (!supportMessage.trim()) return;
+                      setSupportSuccess(true);
+                    }}
+                    className="flex flex-col gap-3.5"
+                  >
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-gray-400 font-black">
+                        {isRTL ? 'نوع المشكلة / فئة الدعم' : 'Catégorie d\'assistance'}
+                      </label>
+                      <select
+                        value={supportCategory}
+                        onChange={(e) => setSupportCategory(e.target.value)}
+                        className="w-full text-xs border border-gray-200 rounded-xl px-3.5 py-2.5 bg-white focus:outline-none focus:border-blue-500 font-bold"
+                      >
+                        <option value="general">{isRTL ? 'استفسار عام / مساعدة' : 'Assistance générale'}</option>
+                        <option value="billing">{isRTL ? 'مشاكل الحجز والضمان المالي (Escrow)' : 'Paiements & Escrow'}</option>
+                        <option value="report">{isRTL ? 'الإبلاغ عن مستخدم أو نزاع' : 'Signaler un problème ou litige'}</option>
+                        <option value="suggestion">{isRTL ? 'اقتراحات تطوير المنصة' : 'Suggestion d\'amélioration'}</option>
+                      </select>
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-gray-400 font-black">
+                        {isRTL ? 'تفاصيل المشكلة أو الرسالة' : 'Description de votre problème'}
+                      </label>
+                      <textarea
+                        required
+                        rows={4}
+                        value={supportMessage}
+                        onChange={(e) => setSupportMessage(e.target.value)}
+                        placeholder={isRTL ? 'اكتب تفاصيل استفسارك أو مشكلتك بوضوح لمساعدتك...' : 'Décrivez votre problème en détails...'}
+                        className="w-full text-xs border border-gray-200 rounded-xl px-3.5 py-2.5 bg-white focus:outline-none focus:border-blue-500 font-bold resize-none leading-relaxed"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={!supportMessage.trim()}
+                      className="w-full bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs py-3 rounded-xl transition-all cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 shadow-sm"
+                    >
+                      <Send className="w-3.5 h-3.5 text-white" />
+                      <span>{isRTL ? 'إرسال تذكرة الدعم' : 'Envoyer le ticket'}</span>
+                    </button>
+                  </form>
+                )}
+              </div>
+
+            </div>
+          </div>
+        )}
+
         {/* 3. TASKS TAB: POSTED MISSIONS & ESCROW STATUS TRACKING */}
         {activeTab === 'tasks' && (
           <div className="flex flex-col gap-5 animate-fade-in" id="customer-tab-tasks">
@@ -1598,7 +1771,7 @@ export default function UserDashboard({
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {myGivenReviews.map((r) => (
-                    <div key={r.id} className="p-4 rounded-2xl border border-gray-150 flex flex-col gap-2.5 justify-between">
+                    <div key={r.id} className="p-4 rounded-2xl border border-gray-150 flex flex-col gap-2.5 justify-between bg-slate-50/50">
                       <div className="flex items-center justify-between flex-row">
                         <div className="flex items-center gap-0.5 flex-row-reverse">
                           {[...Array(5)].map((_, i) => (
@@ -1615,11 +1788,11 @@ export default function UserDashboard({
                         <span className="text-xs font-black text-slate-850">{isRTL ? 'التقييم المرسل منك' : 'Note attribuée'}</span>
                       </div>
 
-                      <p className="text-xs text-slate-650 leading-relaxed italic pr-2 border-r-2 border-emerald-400 font-medium">
+                      <p className="text-xs text-slate-650 leading-relaxed italic pr-2 border-r-2 border-emerald-400 font-medium text-right font-sans">
                         "{r.comment}"
                       </p>
 
-                      <div className="text-[8.5px] text-gray-400 font-extrabold mt-1 text-left select-none">
+                      <div className="text-[8.5px] text-gray-400 font-bold mt-1 text-left select-none">
                         Ref: Tasker Escrow Resolution Desk
                       </div>
 
@@ -1637,7 +1810,7 @@ export default function UserDashboard({
                 </span>
                 <div className="flex items-center gap-2">
                   <CheckCircle className="w-5 h-5 text-emerald-500" />
-                  <h4 className="text-xs font-black text-slate-800 uppercase">{isRTL ? 'أرشيف معاملا ك السابقة ومهماتك القديمة' : 'Historique des missions clôturées'}</h4>
+                  <h4 className="text-xs font-black text-slate-800 uppercase">{isRTL ? 'أرشيف معاملاتك السابقة ومهماتك القديمة' : 'Historique des missions clôturées'}</h4>
                 </div>
               </div>
 
@@ -1648,7 +1821,7 @@ export default function UserDashboard({
               ) : (
                 <div className="flex flex-col gap-3">
                   {myTasks.filter(t => t.status === 'completed' || t.status === 'cancelled').map((task) => (
-                    <div key={task.id} className="p-3.5 rounded-2xl border border-gray-100 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-right">
+                    <div key={task.id} className="p-3.5 rounded-2xl border border-gray-150 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-right">
                       <div className="flex items-center gap-2 flex-row-reverse">
                         <span className={`w-2 h-2 rounded-full ${task.status === 'completed' ? 'bg-emerald-500' : 'bg-gray-400'}`} />
                         <span className="text-xs font-black text-slate-800">{task.title}</span>
@@ -1666,139 +1839,6 @@ export default function UserDashboard({
               )}
             </div>
 
-          </div>
-        )}
-
-        {/* 6. FILES TAB: DOCUMENT MANAGER */}
-        {activeTab === 'files' && (
-          <div className="flex flex-col gap-6 animate-fade-in" id="customer-tab-files">
-            <div className={`bg-white p-6 rounded-3xl border border-gray-200 shadow-xs text-${isRTL ? 'right' : 'left'}`}>
-              <div className="border-b border-gray-100 pb-4 mb-5 flex flex-col md:flex-row items-center justify-between gap-4">
-                <div className="flex items-center gap-2.5 flex-row-reverse">
-                  <FileText className="w-6 h-6 text-blue-600" />
-                  <div>
-                    <h3 className="text-sm font-black text-slate-900 uppercase">
-                      {isRTL ? 'مركز المستندات والملفات المرفوعة' : 'Mes Documents & Fichiers'}
-                    </h3>
-                    <p className="text-[10px] text-gray-400 mt-1 font-semibold leading-relaxed">
-                      {isRTL 
-                        ? 'قم برفع وإدارة ملفاتك، صور الهوية، أو شهادات المهارات لتسهيل تأكيد الهوية من الرقابة وجلب المشروعات.' 
-                        : 'Déposez et gérez vos documents justificatifs ou diplômes pour certification.'}
-                    </p>
-                  </div>
-                </div>
-                <div className="text-xs font-black text-slate-700 bg-blue-50/50 border border-blue-150 px-3.5 py-1.5 rounded-2xl select-none flex items-center gap-1.5 flex-row-reverse">
-                  <span>{myFiles.length} {isRTL ? 'ملفات مرفوعة' : 'fichiers uploadiés'}</span>
-                </div>
-              </div>
-
-              {/* Upload Drag & Drop Sandbox Segment */}
-              <div className="flex flex-col gap-2.5 mb-6">
-                <label className="text-xs font-bold text-gray-800">
-                  {isRTL ? 'رفع ملف جديد' : 'Uploader un nouveau document'}
-                </label>
-                
-                <div
-                  onDragOver={(e) => { e.preventDefault(); }}
-                  onDrop={async (e) => {
-                    e.preventDefault();
-                    if (uploadingFile) return;
-                    const files = e.dataTransfer.files;
-                    if (files && files.length > 0) {
-                      await handleUploadFile(files[0]);
-                    }
-                  }}
-                  onClick={() => {
-                    const input = document.createElement('input');
-                    input.type = 'file';
-                    input.accept = '*';
-                    input.onchange = async (e: any) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        await handleUploadFile(file);
-                      }
-                    };
-                    input.click();
-                  }}
-                  className="border-2 border-dashed border-gray-200 hover:border-blue-400 bg-gray-50/50 hover:bg-slate-50/40 rounded-2xl p-8 text-center cursor-pointer transition-all flex flex-col items-center justify-center gap-2 max-w-xl mx-auto w-full group"
-                >
-                  <Upload className="w-8 h-8 text-blue-500 group-hover:scale-110 transition-transform" />
-                  <span className="text-xs font-extrabold text-slate-800 leading-none">
-                    {uploadingFile ? (isRTL ? 'جاري التحميل والحفظ للأمن...' : 'Téléchargement sécurisé...') : (isRTL ? 'اسحب الملف هنا، أو انقر لبدء الرفع' : 'Glissez-déposez le document ici ou cliquez')}
-                  </span>
-                  <p className="text-[10px] text-gray-400 font-semibold leading-relaxed mt-1">
-                    {isRTL 
-                      ? 'يمكنك رفع الصور والمستندات بحد أقصى ٢.٥ ميجابايت' 
-                      : 'Formats acceptés: PDF, PNG, JPG (Max 2.5 mo)'}
-                  </p>
-                </div>
-                {fileError && (
-                  <div className="text-xs text-rose-600 font-bold bg-rose-50/50 border border-rose-100 p-3 rounded-2xl flex items-center gap-2 max-w-xl mx-auto w-full animate-fade-in">
-                    <AlertCircle className="w-4 h-4 text-rose-500" />
-                    <span>{fileError}</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Uploaded Documents List Section */}
-              <h4 className="text-xs font-black text-slate-800 uppercase mb-3 text-right">
-                {isRTL ? 'الملفات المرفوعة مسبقاً' : 'Liste des fichiers sauvegardés'}
-              </h4>
-
-              {loadingFiles ? (
-                <div className="h-24 bg-slate-50 animate-pulse rounded-2xl w-full" />
-              ) : myFiles.length === 0 ? (
-                <div className="py-12 text-center text-[11px] text-gray-400 font-bold bg-slate-50/30 border border-dashed rounded-2xl flex flex-col items-center gap-2">
-                  <FileText className="w-8 h-8 text-gray-300" />
-                  <span>{isRTL ? 'لم تقم برفع أي ملف أو مستند إثبات بعد.' : 'Aucun fichier dans votre coffre fort pour l’instant.'}</span>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-fade-in">
-                  {myFiles.map((file) => {
-                    const fileSizeKB = (file.fileSize / 1024).toFixed(1);
-                    return (
-                      <div key={file.id} className="p-4 rounded-2xl border border-gray-150 flex items-center justify-between gap-3 text-right bg-slate-50/30">
-                        <button
-                          onClick={async () => {
-                            if (window.confirm(isRTL ? 'هل أنت متأكد من حذف هذا الملف نهائياً؟' : 'Supprimer définitivement ce fichier ?')) {
-                              try {
-                                await deleteDoc(doc(db, 'files', file.id));
-                              } catch (err) {
-                                handleFirestoreError(err, OperationType.DELETE, `files/${file.id}`);
-                              }
-                            }
-                          }}
-                          className="text-gray-400 hover:text-rose-600 p-2 rounded-xl transition-all hover:bg-rose-50 cursor-pointer shrink-0"
-                          title={isRTL ? 'حذف الملف المرفوع' : 'Supprimer'}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                        
-                        <div className="flex items-center gap-3 overflow-hidden flex-row-reverse select-none">
-                          <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600 shrink-0">
-                            <FileText className="w-5 h-5" />
-                          </div>
-                          <div className="flex flex-col text-right truncate">
-                            <a 
-                              href={file.fileUrl} 
-                              download={file.fileName}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-xs font-extrabold text-blue-600 hover:text-blue-700 hover:underline truncate"
-                            >
-                              {file.fileName}
-                            </a>
-                            <span className="text-[9px] text-gray-400 font-bold mt-1">
-                              {file.fileType} • {fileSizeKB} KB
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
           </div>
         )}
 

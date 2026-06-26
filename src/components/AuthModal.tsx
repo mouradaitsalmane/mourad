@@ -1,19 +1,12 @@
 import React, { useState } from 'react';
 import { 
   auth, 
-  db, 
   googleProvider, 
-  signInWithPopup, 
-  handleFirestoreError,
-  OperationType
+  signInWithPopup 
 } from '../lib/firebase';
 import { 
-  createUserWithEmailAndPassword, 
-  signInWithEmailAndPassword, 
   sendPasswordResetEmail,
-  updateProfile 
 } from 'firebase/auth';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { 
   X, 
   Mail, 
@@ -31,6 +24,7 @@ import {
 import { LanguageKey, TRANSLATIONS } from '../data/rabatData';
 import { UserProfile, UserPrivateInfo } from '../types';
 import Logo from './Logo';
+import { useAuth } from '../context/AuthContext';
 
 interface AuthModalProps {
   onClose: () => void;
@@ -44,6 +38,7 @@ type AuthMode = 'signin' | 'signup' | 'forgot';
 export default function AuthModal({ onClose, lang, onSuccess, initialMode }: AuthModalProps) {
   const t = TRANSLATIONS[lang];
   const isRTL = lang === 'ar';
+  const { login, signup } = useAuth();
 
   const [mode, setMode] = useState<AuthMode>(initialMode || 'signin');
   const [error, setError] = useState<string | null>(null);
@@ -57,12 +52,18 @@ export default function AuthModal({ onClose, lang, onSuccess, initialMode }: Aut
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [agreeTerms, setAgreeTerms] = useState(false);
+  const [selectedRole, setSelectedRole] = useState<'client' | 'tasker' | null>(null);
+  const [signupStep, setSignupStep] = useState<1 | 2>(1);
 
   // Toggle Modes
   const handleSwitchMode = (newMode: AuthMode) => {
     setMode(newMode);
     setError(null);
     setSuccessMsg(null);
+    if (newMode === 'signup') {
+      setSignupStep(1);
+      setSelectedRole(null);
+    }
   };
 
   // Google Authentication Trigger
@@ -131,20 +132,20 @@ export default function AuthModal({ onClose, lang, onSuccess, initialMode }: Aut
       }
       try {
         setLoading(true);
-        await signInWithEmailAndPassword(auth, email.trim(), password);
+        await login(email.trim(), password);
         onSuccess();
         onClose();
       } catch (err: any) {
         console.error(err);
         let errorMsg = isRTL ? 'فشل تسجيل الدخول. يرجى التأكد من البريد الإلكتروني أو كلمة المرور.' : 'Identifiants incorrects.';
-        if (err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found') {
+        if (err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
           errorMsg = isRTL ? 'البريد الإلكتروني أو كلمة المرور غير صحيحة.' : 'E-mail ou mot de passe incorrect.';
         } else if (err.code === 'auth/invalid-email') {
           errorMsg = isRTL ? 'عنوان البريد الإلكتروني غير صالح.' : 'E-mail invalide.';
-        } else if (err.code === 'auth/operation-not-allowed') {
-          errorMsg = isRTL 
-            ? 'خطأ: طريقة تسجيل الدخول بالبريد الإلكتروني غير مفعّلة حالياً في لوحة تحكم Firebase (auth/operation-not-allowed).\n\nلتفعيلها:\n1. اذهب أولاً إلى console.firebase.google.com وافتح مشروعك\n2. افتح قائمة Authentication ثم تبويب Sign-in method\n3. انقر على Email/Password وقُم بتفعيلها وحفظ التغييرات.\n\n* أو يمكنك تسجيل الدخول حالياً بنقرة واحدة عن طريق مفتاح Google بالأسفل.'
-            : 'La méthode d’authentification par E-mail/Mot de passe n’est pas activée dans votre console Firebase (auth/operation-not-allowed).\n\nPour l’activer :\n1. Allez sur console.firebase.google.com et ouvrez votre projet\n2. Ouvrez l’onglet "Authentication" puis "Sign-in method"\n3. Activez "Adresse e-mail/Mot de passe" et enregistrez.\n\n* Vous pouvez également utiliser le bouton Google ci-dessous pour vous connecter.';
+        } else if (err.code === 'auth/network-request-failed') {
+          errorMsg = isRTL ? 'خطأ في الاتصال بالشبكة. يرجى التحقق من اتصالك بالإنترنت.' : 'Erreur de réseau. Veuillez vérifier votre connexion.';
+        } else if (err.message?.includes('Profile document not found')) {
+          errorMsg = isRTL ? 'لم يتم العثور على ملف تعريف المستخدم في قاعدة البيانات.' : 'Profil introuvable dans la base de données.';
         }
         setError(errorMsg);
       } finally {
@@ -175,71 +176,10 @@ export default function AuthModal({ onClose, lang, onSuccess, initialMode }: Aut
       try {
         setLoading(true);
 
-        // A. Create Firebase Authentication account
-        let freshUser;
-        try {
-          const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), password);
-          freshUser = userCredential.user;
-        } catch (authErr: any) {
-          console.error("Firebase Auth Account Creation Failed:", authErr);
-          if (authErr.code === 'auth/email-already-in-use') {
-            setError(isRTL ? 'هذا البريد الإلكتروني مسجل بالفعل.' : 'Cet e-mail est déjà utilisé.');
-          } else if (authErr.code === 'auth/invalid-email') {
-            setError(isRTL ? 'عنوان البريد الإلكتروني المدخل غير صالح.' : 'E-mail invalide.');
-          } else if (authErr.code === 'auth/weak-password' || authErr.code === 'auth/password-does-not-meet-requirements') {
-            setError(isRTL ? 'كلمة المرور ضعيفة أو لا تستوفي شروط الحماية المطلوبة (يُنصح بـ 10 أحرف كحد أدنى).' : 'Le mot de passe est trop faible ou ne respecte pas les exigences de sécurité (minimum 10 caractères requis).');
-          } else if (authErr.code === 'auth/operation-not-allowed') {
-            setError(isRTL 
-              ? 'خطأ: طريقة التسجيل بالبريد الإلكتروني غير مفعّلة حالياً في قائمة الـ Firebase Dashboard.\n\nلتسوية هذا وتفعيلها:\n1. قم بزيارة console.firebase.google.com وافتح مشروعك\n2. من القائمة الجانبية افتح Authentication ثم تبويب Sign-in method\n3. أضف Email/Password كـ Provider ومكّن خيار التفعيل ثم احفظ.\n\n* بشكل بديل، يمكنك وبسهولة التسجيل مستخدماً زر Google أدناه مباشرة.'
-              : 'La méthode d’authentification par E-mail/Mot de passe n’est pas activée dans votre console Firebase (auth/operation-not-allowed).\n\nPour l’activer :\n1. Allez sur console.firebase.google.com et ouvrez votre projet\n2. Allez dans Authentication -> onglet Sign-in method\n3. Ajoutez "Adresse e-mail/Mot de passe", activez et enregistrez.\n\n* Sinon, vous pouvez simplement utiliser l’authentification Google ci-dessous.');
-          } else {
-            setError(isRTL 
-              ? `فشل إنشاء الحساب الإلكتروني: ${authErr.message || authErr}` 
-              : `Échec de la création du compte d'authentification : ${authErr.message || authErr}`);
-          }
-          setLoading(false);
-          return;
-        }
-
-        // B. Update Auth Display Name
-        try {
-          await updateProfile(freshUser, { displayName: fullName.trim() });
-        } catch (profileErr: any) {
-          console.warn("Failed to set authentication display name profile:", profileErr);
-        }
-
-        // C. Save Public Profile to Firestore Doc
-        const publicProfile: UserProfile = {
-          uid: freshUser.uid,
-          displayName: fullName.trim(),
-          bio: isRTL ? 'مستخدم جديد في مجتمع Tasker.' : 'Nouveau membre sur Tasker.',
-          rating: 0,
-          reviewsCount: 0,
-          isTasker: true, // Default to tasker, they can edit anytime in settings
-          location: isRTL ? 'أكدال' : 'Agdal',
-          createdAt: serverTimestamp()
-        };
+        const userRole = (selectedRole === 'client' || selectedRole === 'tasker') ? selectedRole : 'client';
+        const mappedRole = userRole === 'tasker' ? 'worker' : 'client';
         
-        try {
-          await setDoc(doc(db, 'users', freshUser.uid), publicProfile);
-        } catch (firestorePubErr: any) {
-          console.error("Firestore Public User Profile Database Creation Failed:", firestorePubErr);
-          handleFirestoreError(firestorePubErr, OperationType.CREATE, `users/${freshUser.uid}`);
-        }
-
-        // D. Save Private Profile (Split collection PII strategy)
-        const privateProfile: UserPrivateInfo = {
-          email: email.trim(),
-          phone: phone.trim(),
-          updatedAt: serverTimestamp()
-        };
-        
-        try {
-          await setDoc(doc(db, 'users', freshUser.uid, 'private', 'info'), privateProfile);
-        } catch (firestorePrivErr: any) {
-          console.error("Firestore Private User Info (PII) Database Creation Failed:", firestorePrivErr);
-          handleFirestoreError(firestorePrivErr, OperationType.CREATE, `users/${freshUser.uid}/private/info`);
-        }
+        await signup(email.trim(), password, mappedRole, fullName.trim(), phone.trim());
 
         setSuccessMsg(isRTL ? 'تم إنشاء حسابك بنجاح وجاري توجيهك...' : 'Compte créé avec succès !');
         setTimeout(() => {
@@ -250,7 +190,15 @@ export default function AuthModal({ onClose, lang, onSuccess, initialMode }: Aut
       } catch (err: any) {
         console.error("General Signup catch block caught error:", err);
         let errorMsg = isRTL ? 'فشل إنشاء الحساب الشخصي.' : 'Erreur lors de la création du compte.';
-        if (err.message) {
+        if (err.code === 'auth/email-already-in-use') {
+          errorMsg = isRTL ? 'هذا البريد الإلكتروني مسجل بالفعل.' : 'Cet e-mail est déjà utilisé.';
+        } else if (err.code === 'auth/invalid-email') {
+          errorMsg = isRTL ? 'عنوان البريد الإلكتروني غير صالح.' : 'E-mail invalide.';
+        } else if (err.code === 'auth/weak-password') {
+          errorMsg = isRTL ? 'كلمة المرور ضعيفة جداً. يرجى اختيار كلمة مرور أقوى.' : 'Le mot de passe est trop faible.';
+        } else if (err.code === 'auth/network-request-failed') {
+          errorMsg = isRTL ? 'خطأ في الاتصال بالشبكة. يرجى التحقق من اتصالك بالإنترنت.' : 'Erreur de réseau. Veuillez vérifier votre connexion.';
+        } else if (err.message) {
           try {
             const parsed = JSON.parse(err.message);
             if (parsed && parsed.error) {
@@ -259,7 +207,7 @@ export default function AuthModal({ onClose, lang, onSuccess, initialMode }: Aut
                 : `Erreur base de données (${parsed.operationType} ${parsed.path}) : ${parsed.error}`;
             }
           } catch {
-            errorMsg += ` - ${err.message}`;
+            errorMsg = err.message;
           }
         }
         setError(errorMsg);
@@ -381,123 +329,229 @@ export default function AuthModal({ onClose, lang, onSuccess, initialMode }: Aut
 
             {/* B. SIGN UP VIEW */}
             {mode === 'signup' && (
-              <div className="flex flex-col gap-3.5">
-                
-                {/* Full name */}
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-bold text-gray-700">
-                    {isRTL ? 'الاسم الكامل واللقب الهوياتي' : 'Nom complet'}
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      required
-                      placeholder={isRTL ? 'مثال: يوسف الإدريسي' : 'Youssef El Idrissi'}
-                      value={fullName}
-                      onChange={(e) => setFullName(e.target.value)}
-                      className="w-full text-xs font-semibold border border-gray-200 rounded-xl px-4 py-3.5 pl-10 focus:outline-none focus:border-sky-500 whitespace-nowrap overflow-ellipsis"
-                    />
-                    <User className="absolute left-3.5 top-3.5 w-4.5 h-4.5 text-gray-400 pointer-events-none" />
-                  </div>
-                </div>
+              <div className="flex flex-col gap-4">
+                {signupStep === 1 ? (
+                  <div className="flex flex-col gap-4">
+                    <div className="text-center mb-1">
+                      <h4 className="text-sm font-bold text-gray-800">
+                        {isRTL ? 'اختر نوع الحساب للبدء' : 'Sélectionnez le type de compte'}
+                      </h4>
+                      <p className="text-[11px] text-gray-500 mt-0.5">
+                        {isRTL ? 'يرجى تحديد دورك الأساسي في مجتمع خدمات الرباط' : 'Veuillez définir votre rôle principal sur la plateforme'}
+                      </p>
+                    </div>
 
-                {/* Email */}
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-bold text-gray-700">
-                    {isRTL ? 'البريد الإلكتروني للتوثيق' : 'Adresse e-mail'}
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="email"
-                      required
-                      placeholder="youssef@example.com"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="w-full text-xs font-semibold border border-gray-200 rounded-xl px-4 py-3.5 pl-10 focus:outline-none focus:border-sky-500"
-                    />
-                    <Mail className="absolute left-3.5 top-3.5 w-4.5 h-4.5 text-gray-400 pointer-events-none" />
-                  </div>
-                </div>
+                    <div className="grid grid-cols-1 gap-3.5">
+                      {/* Brand Client */}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedRole('client')}
+                        className={`flex items-start gap-4 p-4 border rounded-2xl text-right transition-all cursor-pointer ${
+                          selectedRole === 'client'
+                            ? 'border-sky-500 bg-sky-50/40 shadow-sm'
+                            : 'border-gray-100 hover:border-gray-200 hover:bg-gray-50/50'
+                        }`}
+                      >
+                        <div className={`p-2.5 rounded-xl shrink-0 mt-0.5 ${selectedRole === 'client' ? 'bg-sky-500 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                          <User className="w-5 h-5" />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <span className="text-xs font-bold text-gray-800">
+                            {isRTL ? 'أنا طالب خدمة (عميل)' : 'Je suis Client (Poster)'}
+                          </span>
+                          <span className="text-[10px] text-gray-500 leading-normal">
+                            {isRTL 
+                              ? 'أريد نشر وتفويض المهام المنزلية، البحث عن حرفيين موثوقين، والدفع بأمان تام.' 
+                              : 'Pour publier des tâches, poser des budgets, et embaucher des prestataires qualifiés.'}
+                          </span>
+                        </div>
+                      </button>
 
-                {/* Phone */}
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-bold text-gray-700">
-                    {isRTL ? 'رقم الهاتف للتواصل المباشر مع طالبي الخدمة' : 'Numéro de téléphone'}
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="tel"
-                      required
-                      placeholder="0612345678"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      className="w-full text-xs font-semibold border border-gray-200 rounded-xl px-4 py-3.5 pl-10 focus:outline-none focus:border-sky-500"
-                    />
-                    <Phone className="absolute left-3.5 top-3.5 w-4.5 h-4.5 text-gray-400 pointer-events-none" />
-                  </div>
-                </div>
+                      {/* Brand Tasker */}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedRole('tasker')}
+                        className={`flex items-start gap-4 p-4 border rounded-2xl text-right transition-all cursor-pointer ${
+                          selectedRole === 'tasker'
+                            ? 'border-sky-500 bg-sky-50/40 shadow-sm'
+                            : 'border-gray-100 hover:border-gray-200 hover:bg-gray-50/50'
+                        }`}
+                      >
+                        <div className={`p-2.5 rounded-xl shrink-0 mt-0.5 ${selectedRole === 'tasker' ? 'bg-sky-500 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                          <Sparkles className="w-5 h-5" />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <span className="text-xs font-bold text-gray-800">
+                            {isRTL ? 'أنا منفذ خدمة (مُقدّم خدمة)' : 'Je suis Prestataire (Tasker)'}
+                          </span>
+                          <span className="text-[10px] text-gray-500 leading-normal">
+                            {isRTL 
+                              ? 'أريد العثور على مهام يومية، إرسال عروضي المهنية، وجني عوائد ومكاسب ممتازة.' 
+                              : 'Pour postuler aux offres, proposer vos tarifs, et retirer vos gains réels.'}
+                          </span>
+                        </div>
+                      </button>
+                    </div>
 
-                {/* Passwords row layout */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-xs font-bold text-gray-700">
-                      {isRTL ? 'كلمة المرور' : 'Mot de passe'}
-                    </label>
-                    <div className="relative">
+                    <button
+                      type="button"
+                      disabled={!selectedRole}
+                      onClick={() => setSignupStep(2)}
+                      className="w-full bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white font-bold py-3.5 px-4 rounded-xl text-xs transition-colors shadow-md mt-2 flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <span>{isRTL ? 'المتابعة وإدخال التفاصيل' : 'Continuer l’inscription'}</span>
+                      {isRTL ? <ChevronRight className="w-4 h-4 transform rotate-180" /> : <ChevronRight className="w-4 h-4" />}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-3.5">
+                    {/* Selected Role Tag indicator */}
+                    <div className="flex items-center justify-between bg-sky-50/60 border border-sky-100/40 rounded-xl px-4 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="w-4 h-4 text-sky-600" />
+                        <span className="text-[11px] font-bold text-sky-800">
+                          {isRTL ? 'الحساب المختار:' : 'Rôle sélectionné :'}
+                        </span>
+                        <span className="text-[11px] font-extrabold text-sky-900 bg-sky-100 rounded-lg px-2 py-0.5">
+                          {selectedRole === 'client' 
+                            ? (isRTL ? 'طالب خدمة (Client)' : 'Client') 
+                            : (isRTL ? 'منفذ خدمة (Tasker)' : 'Prestataire')}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setSignupStep(1)}
+                        className="text-[11px] font-bold text-sky-600 hover:underline cursor-pointer flex items-center gap-1"
+                      >
+                        {isRTL ? 'تغيير' : 'Changer'}
+                      </button>
+                    </div>
+
+                    {/* Full name */}
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs font-bold text-gray-700">
+                        {isRTL ? 'الاسم الكامل واللقب الهوياتي' : 'Nom complet'}
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          required
+                          placeholder={isRTL ? 'مثال: يوسف الإدريسي' : 'Youssef El Idrissi'}
+                          value={fullName}
+                          onChange={(e) => setFullName(e.target.value)}
+                          className="w-full text-xs font-semibold border border-gray-200 rounded-xl px-4 py-3.5 pl-10 focus:outline-none focus:border-sky-500 whitespace-nowrap overflow-ellipsis"
+                        />
+                        <User className="absolute left-3.5 top-3.5 w-4.5 h-4.5 text-gray-400 pointer-events-none" />
+                      </div>
+                    </div>
+
+                    {/* Email */}
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs font-bold text-gray-700">
+                        {isRTL ? 'البريد الإلكتروني للتوثيق' : 'Adresse e-mail'}
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="email"
+                          required
+                          placeholder="youssef@example.com"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          className="w-full text-xs font-semibold border border-gray-200 rounded-xl px-4 py-3.5 pl-10 focus:outline-none focus:border-sky-500"
+                        />
+                        <Mail className="absolute left-3.5 top-3.5 w-4.5 h-4.5 text-gray-400 pointer-events-none" />
+                      </div>
+                    </div>
+
+                    {/* Phone */}
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs font-bold text-gray-700">
+                        {isRTL ? 'رقم الهاتف للتواصل المباشر' : 'Numéro de téléphone'}
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="tel"
+                          required
+                          placeholder="0612345678"
+                          value={phone}
+                          onChange={(e) => setPhone(e.target.value)}
+                          className="w-full text-xs font-semibold border border-gray-200 rounded-xl px-4 py-3.5 pl-10 focus:outline-none focus:border-sky-500"
+                        />
+                        <Phone className="absolute left-3.5 top-3.5 w-4.5 h-4.5 text-gray-400 pointer-events-none" />
+                      </div>
+                    </div>
+
+                    {/* Passwords row layout */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-xs font-bold text-gray-700">
+                          {isRTL ? 'كلمة المرور' : 'Mot de passe'}
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="password"
+                            required
+                            placeholder="••••••••"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            className="w-full text-xs border border-gray-200 rounded-xl px-4 py-3.5 pl-10 focus:outline-none focus:border-sky-500"
+                          />
+                          <Lock className="absolute left-3.5 top-3.5 w-4.5 h-4.5 text-gray-400 pointer-events-none" />
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-xs font-bold text-gray-700">
+                          {isRTL ? 'تأكيد كلمة المرور' : 'Confirmer word'}
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="password"
+                            required
+                            placeholder="••••••••"
+                            value={confirmPassword}
+                            onChange={(e) => setConfirmPassword(e.target.value)}
+                            className="w-full text-xs border border-gray-200 rounded-xl px-4 py-3.5 pl-10 focus:outline-none focus:border-sky-500"
+                          />
+                          <Lock className="absolute left-3.5 top-3.5 w-4.5 h-4.5 text-gray-400 pointer-events-none" />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Terms agreement checkbox */}
+                    <div className="flex items-start gap-2.5 mt-1.5">
                       <input
-                        type="password"
-                        required
-                        placeholder="••••••••"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        className="w-full text-xs border border-gray-200 rounded-xl px-4 py-3.5 pl-10 focus:outline-none focus:border-sky-500"
+                        type="checkbox"
+                        id="terms-signup-chk"
+                        checked={agreeTerms}
+                        onChange={(e) => setAgreeTerms(e.target.checked)}
+                        className="w-4 h-4 rounded text-sky-600 border-gray-200 focus:ring-sky-500 pointer-events-auto cursor-pointer mt-0.5 shrink-0"
                       />
-                      <Lock className="absolute left-3.5 top-3.5 w-4.5 h-4.5 text-gray-400 pointer-events-none" />
+                      <label htmlFor="terms-signup-chk" className="text-[11px] text-gray-500 leading-relaxed font-semibold cursor-pointer">
+                        {isRTL 
+                          ? 'أوافق وألتزم بشروط الاستخدام وسياسة الخصوصية الخاصة بمنصة Tasker، وأتعهد بالتعامل الخلوق والنافع مع سكان المدينة.' 
+                          : 'J’accepte les conditions d’utilisation de Tasker.'}
+                      </label>
+                    </div>
+
+                    <div className="flex gap-3.5 mt-2">
+                      <button
+                        type="button"
+                        onClick={() => setSignupStep(1)}
+                        className="bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-3.5 px-4 rounded-xl text-xs transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        {isRTL ? 'رجوع' : 'Retour'}
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={loading}
+                        className="flex-1 bg-sky-500 hover:bg-sky-600 text-white font-bold py-3.5 px-4 rounded-xl text-xs transition-colors shadow-md hover:shadow-lg cursor-pointer active:scale-98 disabled:opacity-50"
+                      >
+                        {loading ? (isRTL ? 'جاري إنشاء الحساب...' : 'Création en cours...') : (isRTL ? 'إنشاء حساب جديد والمتابعة' : 'Créer un compte')}
+                      </button>
                     </div>
                   </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-xs font-bold text-gray-700">
-                      {isRTL ? 'تأكيد كلمة المرور' : 'Confirmer word'}
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="password"
-                        required
-                        placeholder="••••••••"
-                        value={confirmPassword}
-                        onChange={(e) => setConfirmPassword(e.target.value)}
-                        className="w-full text-xs border border-gray-200 rounded-xl px-4 py-3.5 pl-10 focus:outline-none focus:border-sky-500"
-                      />
-                      <Lock className="absolute left-3.5 top-3.5 w-4.5 h-4.5 text-gray-400 pointer-events-none" />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Terms agreement checkbox */}
-                <div className="flex items-start gap-2.5 mt-1.5">
-                  <input
-                    type="checkbox"
-                    id="terms-signup-chk"
-                    checked={agreeTerms}
-                    onChange={(e) => setAgreeTerms(e.target.checked)}
-                    className="w-4 h-4 rounded text-sky-600 border-gray-200 focus:ring-sky-500 pointer-events-auto cursor-pointer mt-0.5 shrink-0"
-                  />
-                  <label htmlFor="terms-signup-chk" className="text-[11px] text-gray-500 leading-relaxed font-semibold cursor-pointer">
-                    {isRTL 
-                      ? 'أوافق وألتزم بشروط الاستخدام وسياسة الخصوصية الخاصة بمنصة Tasker، وأتعهد بالتعامل الخلوق والنافع مع سكان المدينة.' 
-                      : 'J’accepte les conditions d’utilisation de Tasker.'}
-                  </label>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full bg-sky-500 hover:bg-sky-600 text-white font-bold py-3.5 px-4 rounded-xl text-xs transition-colors shadow-md hover:shadow-lg mt-2 cursor-pointer active:scale-98 disabled:opacity-50"
-                >
-                  {loading ? (isRTL ? 'جاري إنشاء الحساب...' : 'Création en cours...') : (isRTL ? 'إنشاء حساب جديد والمتابعة' : 'Créer un compte')}
-                </button>
-
+                )}
               </div>
             )}
 

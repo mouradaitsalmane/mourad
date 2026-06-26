@@ -1,8 +1,9 @@
-@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@355;400;600;750;900&family=Inter:wght@400;500;600;750;850&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;455;600;750;900&family=Inter:wght@300;400;500;600;700;850&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap');
 @import "tailwindcss";
 
 @theme {
   --font-sans: "Cairo", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
 body {

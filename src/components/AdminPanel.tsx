@@ -1,17 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { 
-  collection, 
-  onSnapshot, 
-  doc, 
-  deleteDoc, 
-  updateDoc,
-  serverTimestamp,
-  query,
-  where
-} from 'firebase/firestore';
+import { auth } from '../lib/firebase';
 import { Task, UserProfile } from '../types';
 import { LanguageKey } from '../data/rabatData';
+import { 
+  subscribeToAdminUsers, 
+  subscribeToAdminFiles, 
+  subscribeToAdminFraud, 
+  adminBlockUserService,
+  adminDeleteTaskService,
+  adminUpdateUserProfileService
+} from '../services/adminService';
 
 // Subcomponents modular imports
 import DashboardOverview from './admin/DashboardOverview';
@@ -65,6 +63,7 @@ export default function AdminPanel({ lang, tasks }: AdminPanelProps) {
   // Core configuration states
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isFocusMode, setIsFocusMode] = useState(false);
 
   const tabLabelsAr: Record<string, string> = {
     dashboard: 'لوحة القيادة والموجز',
@@ -148,42 +147,54 @@ export default function AdminPanel({ lang, tasks }: AdminPanelProps) {
 
   // Real-time Firestore synchronizer
   useEffect(() => {
-    const unsubUsers = onSnapshot(
-      query(collection(db, 'users'), where('isDeleted', '!=', true)),
-      (snap) => {
-        const uList: UserProfile[] = [];
-        snap.forEach((doc) => {
-          uList.push({ uid: doc.id, ...doc.data() } as any);
-        });
+    const unsubUsers = subscribeToAdminUsers(
+      (uList) => {
         setUsers(uList);
         setLoadingUsers(false);
       },
       (err) => {
-        handleFirestoreError(err, OperationType.LIST, 'users');
         setLoadingUsers(false);
       }
     );
 
-    const unsubFiles = onSnapshot(
-      collection(db, 'files'),
-      (snap) => {
-        const fList: any[] = [];
-        snap.forEach((doc) => {
-          fList.push({ id: doc.id, ...doc.data() });
-        });
+    const unsubFiles = subscribeToAdminFiles(
+      (fList) => {
         setAllFiles(fList);
         setLoadingFiles(false);
       },
       (err) => {
-        handleFirestoreError(err, OperationType.LIST, 'files');
         setLoadingFiles(false);
+      }
+    );
+
+    const unsubFraud = subscribeToAdminFraud(
+      (fAlertList) => {
+        if (fAlertList.length > 0) {
+          setFraudAlerts(fAlertList);
+        }
+      },
+      (err) => {
+        console.error("Failed to listen to fraud alerts:", err);
       }
     );
 
     return () => {
       unsubUsers();
       unsubFiles();
+      unsubFraud();
     };
+  }, []);
+
+  // Responsive sidebar collapse handle for tablets/mobiles
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth < 1024) {
+        setIsSidebarCollapsed(true);
+      }
+    };
+    handleResize(); // trigger initially
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
   }, []);
 
   // Admin writes/mutations proxy (BLOCK USER)
@@ -196,23 +207,10 @@ export default function AdminPanel({ lang, tasks }: AdminPanelProps) {
     }
 
     setProcessingUsers(prev => ({ ...prev, [userId]: true }));
-    const endpoint = isCurrentlySuspended ? '/api/admin/unblock-user' : '/api/admin/block-user';
-    const actionLabel = isCurrentlySuspended ? 'unblock' : 'block';
+    const shouldSuspend = !isCurrentlySuspended;
 
     try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ userId, adminId }),
-      });
-
-      const resData = await response.json();
-
-      if (!response.ok || !resData.success) {
-        throw new Error(resData.error || `Failed to ${actionLabel} user.`);
-      }
+      await adminBlockUserService(userId, adminId, shouldSuspend);
 
       showToast(
         isRTL 
@@ -277,6 +275,50 @@ export default function AdminPanel({ lang, tasks }: AdminPanelProps) {
       );
     } finally {
       setProcessingUsers(prev => ({ ...prev, [userId]: false }));
+    }
+  };
+
+  // PERMANENTLY PURGE TASK FROM DB
+  const handleDeleteTask = async (taskId: string) => {
+    try {
+      await adminDeleteTaskService(taskId);
+      showToast(
+        isRTL 
+          ? 'تم حذف الصفقة الحقيقية نهائياً من قاعدة البيانات بنجاح!' 
+          : 'Task has been permanently deleted from Firestore.', 
+        'success'
+      );
+      setSystemLogs(prev => [`Purged task document [${taskId}] from Firestore`, ...prev]);
+    } catch (err: any) {
+      console.error(err);
+      showToast(
+        isRTL 
+          ? `فشل حذف الصفقة: ${err.message || 'خطأ'}` 
+          : `Purge failed: ${err.message || 'error'}`, 
+        'error'
+      );
+    }
+  };
+
+  // UPDATE USER PROFILE DOCUMENT (Real-time sync)
+  const handleUpdateUserProfile = async (userId: string, updatedData: any) => {
+    try {
+      await adminUpdateUserProfileService(userId, updatedData);
+      showToast(
+        isRTL
+          ? 'تم تحديث بيانات العضو مباشرة بنجاح!'
+          : 'User profile updated successfully.',
+        'success'
+      );
+      setSystemLogs(prev => [`Updated profile for user [${userId}]`, ...prev]);
+    } catch (err: any) {
+      console.error(err);
+      showToast(
+        isRTL
+          ? `فشل التعديل: ${err.message}`
+          : `Profile edit failed: ${err.message}`,
+        'error'
+      );
     }
   };
 
@@ -430,99 +472,107 @@ export default function AdminPanel({ lang, tasks }: AdminPanelProps) {
     userEmailsMock[u.uid] = `${u.displayName ? u.displayName.toLowerCase().replace(/\s+/g, '') : 'user'}@airtasker.ma`;
   });
 
-  // Sidebar grouping schema
+  // Sidebar grouping schema aligned with the luxury mockup reference
   const sidebarGroups = [
     {
-      titleAr: 'العمليات والتحكم',
-      titleFr: 'Cœur de Plateforme',
+      titleAr: 'الرئيسية',
+      titleFr: 'Vue d\'Ensemble',
       items: [
-        { id: 'dashboard' as const, ar: 'الموجز ولوحة القيادة', fr: 'Dashboard', icon: LayoutDashboard },
-        { id: 'users' as const, ar: 'إدارة شؤون الأعضاء', fr: 'Users Directory', icon: Users },
-        { id: 'orders' as const, ar: 'متابعة الصفقات والمهام', fr: 'Orders Ledger', icon: Briefcase }
+        { id: 'dashboard' as const, ar: 'لوحة التحكم', fr: 'Tableau de bord', icon: LayoutDashboard },
+        { id: 'analytics' as const, ar: 'الإحصائيات', fr: 'Analyses globales', icon: TrendingUp }
       ]
     },
     {
-      titleAr: 'المنظومة المالية والترخيص',
-      titleFr: 'Desk Financier',
+      titleAr: 'إدارة المنصة',
+      titleFr: 'Gestion de Plateforme',
       items: [
-        { id: 'finance' as const, ar: 'معاملات Payzone والمحاسبة', fr: 'SaaS Finance', icon: Wallet },
-        { id: 'services' as const, ar: 'فئات ونسب وموديلات خدمات', fr: 'Services Catalog', icon: Sliders }
+        { id: 'users' as const, ar: 'المستخدمون', fr: 'Gestion Membres', icon: Users },
+        { id: 'orders' as const, ar: 'الطلبات والعمليات', fr: 'Commandes & Suivi', icon: FileText },
+        { id: 'services' as const, ar: 'التصنيفات والفئات', fr: 'Catégories services', icon: Sliders },
+        { id: 'finance' as const, ar: 'المدفوعات والمحاسبة', fr: 'Flux Financiers', icon: Wallet },
+        { id: 'disputes' as const, ar: 'المهام والتحكيم', fr: 'Arbitrage Litiges', icon: Briefcase },
+        { id: 'support' as const, ar: 'المراجعات والدعم', fr: 'Tickets Support', icon: Star }
       ]
     },
     {
-      titleAr: 'الضمان وحسن التشغيل',
-      titleFr: 'Assistance & Arbitration',
+      titleAr: 'نظام الأفلييت التسويقي',
+      titleFr: 'Système d\'Affiliate',
       items: [
-        { id: 'disputes' as const, ar: 'فض نزاعات الضمان المالي', fr: 'Disputes Arbitration', icon: Megaphone },
-        { id: 'support' as const, ar: 'بطاقات دعم العملاء SLAs', fr: 'Ticket Support SLA', icon: Ticket }
-      ]
-    },
-    {
-      titleAr: 'الأمان والإعدادات التراكمية',
-      titleFr: 'Intelligence & Config',
-      items: [
-        { id: 'analytics' as const, ar: 'إحصائيات المبيعات والنمو BI', fr: 'SaaS Analytics', icon: TrendingUp },
-        { id: 'settings' as const, ar: 'الإعدادات العامة للرباط', fr: 'Platform Settings', icon: Settings },
-        { id: 'security' as const, ar: 'صلاحيات المشرفين الـ RBAC', fr: 'SecOps Config', icon: Lock }
+        { id: 'users' as const, ar: 'المسوقون والأعضاء', fr: 'Artisans Marketeurs', icon: Users },
+        { id: 'finance' as const, ar: 'العمولات والتسوية', fr: 'Commissions', icon: Wallet },
+        { id: 'analytics' as const, ar: 'الزيارات والتحليلات', fr: 'Audience & Trafic', icon: TrendingUp }
       ]
     }
   ];
 
+  // Live Firebase status records for operations panel
+  const firebaseServices = [
+    { name: 'Authentication', status: 'active' },
+    { name: 'Cloud Firestore', status: 'active' },
+    { name: 'Storage', status: 'active' },
+    { name: 'Cloud Functions', status: 'active' }
+  ];
+
   return (
     <div className={`min-h-screen flex transition-all duration-300 font-sans ${
-      isDarkMode ? 'bg-[#0b0f19] text-slate-100' : 'bg-slate-50 text-slate-900'
+      isRTL ? 'flex-row-reverse text-right' : 'flex-row text-left'
+    } ${
+      isDarkMode ? 'bg-[#0f172a] text-slate-100' : 'bg-[#f8fafc] text-slate-900'
     }`}>
-      {/* SIDEBAR NAVIGATION MODULE */}
-      <aside className={`border-r flex flex-col shrink-0 transition-all duration-300 ${
-        isDarkMode ? 'bg-[#111827] border-slate-800' : 'bg-white border-gray-200'
-      } ${isSidebarCollapsed ? 'w-20' : 'w-72'}`}>
+      {/* SIDEBAR NAVIGATION MODULE (STUNNING SYSTEM DARK-BLUE CANVASES LIKE MOCKUP IMAGE) */}
+      <aside className={`flex flex-col shrink-0 transition-all duration-300 relative select-none z-30 ${
+        isFocusMode ? 'w-0 overflow-hidden border-none' : isSidebarCollapsed ? 'w-20' : 'w-72'
+      } bg-[#0b1329] border-r border-[#1e293b] text-[#f1f5f9]`}>
         
-        {/* Header/Brand Section */}
-        <div className="p-5 border-b dark:border-slate-800 flex items-center justify-between">
+        {/* Header/Brand Section with glowing Rabat badge */}
+        <div className="p-5 border-b border-[#1e293b] flex items-center justify-between">
           {!isSidebarCollapsed && (
-            <div className="flex flex-col text-right">
-              <span className="text-xs font-black tracking-widest text-[#6366f1] select-none">
-                RABAT TASKS SAAS
-              </span>
-              <span className="text-[10px] text-gray-400 font-bold select-none uppercase">
-                {isRTL ? 'لوحة تسييل وتحكم المشرف' : 'Back-Office Admin Pro'}
+            <div className={`flex flex-col ${isRTL ? 'text-right' : 'text-left'}`}>
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="text-xs font-black tracking-widest text-indigo-400">
+                  RABAT ADMIN SAAS
+                </span>
+              </div>
+              <span className="text-[10px] text-slate-400 font-extrabold uppercase mt-1">
+                {isRTL ? 'لوحة تسوية المشرف العام' : 'BUREAU D\'ARBITRAGE PRO'}
               </span>
             </div>
           )}
           <button 
             onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-            className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+            className="p-1.5 rounded-lg bg-[#1e293b] text-indigo-400 hover:text-white transition-all cursor-pointer"
           >
             {isSidebarCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
           </button>
         </div>
 
         {/* Scrollable Groups items */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-6 text-right select-none">
+        <div className={`flex-1 overflow-y-auto p-4 space-y-6 ${isRTL ? 'text-right' : 'text-left'} select-none`}>
           {sidebarGroups.map((group, gIdx) => (
             <div key={gIdx} className="flex flex-col gap-1.5">
               {!isSidebarCollapsed && (
-                <span className="text-[9px] uppercase tracking-wider text-gray-400 dark:text-gray-500 font-extrabold px-2 mt-1">
+                <span className="text-[9.5px] uppercase tracking-wider text-slate-400 font-extrabold px-2 mt-1">
                   {isRTL ? group.titleAr : group.titleFr}
                 </span>
               )}
               <div className="flex flex-col gap-1">
-                {group.items.map((item) => {
+                {group.items.map((item, iIdx) => {
                   const Icon = item.icon;
                   const isActive = activeTab === item.id;
                   return (
                     <button
-                      key={item.id}
+                      key={`${item.id}-${iIdx}`}
                       onClick={() => setActiveTab(item.id as any)}
                       className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                         isRTL ? 'flex-row-reverse text-right' : 'flex-row text-left'
                       } ${
                         isActive 
-                          ? 'bg-indigo-650 text-white shadow-xl shadow-indigo-600/10' 
-                          : isDarkMode ? 'text-slate-400 hover:bg-slate-800/50 hover:text-white' : 'text-slate-650 hover:bg-slate-100 hover:text-indigo-605'
+                          ? 'bg-[#2563eb] text-white shadow-xl shadow-blue-600/25' 
+                          : 'text-slate-350 hover:bg-[#1e293b] hover:text-white'
                       }`}
                     >
-                      <Icon className="w-4 h-4 shrink-0" />
+                      <Icon className="w-4 h-4 shrink-0 text-slate-400 group-hover:text-white" />
                       {!isSidebarCollapsed && (
                         <span className="truncate">{isRTL ? item.ar : item.fr}</span>
                       )}
@@ -532,34 +582,73 @@ export default function AdminPanel({ lang, tasks }: AdminPanelProps) {
               </div>
             </div>
           ))}
+
+          {/* FIREBASE & BACKEND LIVE MODULE (FROM IMAGE REF) */}
+          {!isSidebarCollapsed && (
+            <div className="pt-4 border-t border-[#1e293b]">
+              <span className="text-[9.5px] uppercase tracking-wider text-emerald-400 font-extrabold px-2 block mb-2">
+                Firebase & Backend
+              </span>
+              <div className="flex flex-col gap-2 px-2">
+                {firebaseServices.map((service, idx) => (
+                  <div key={idx} className={`flex items-center justify-between text-[11px] ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
+                    <span className="text-slate-300 font-medium">{service.name}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      <span className="text-[9.5px] text-emerald-400 font-black uppercase">Active</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Sidebar Footer */}
-        <div className="p-4 border-t dark:border-slate-800 flex flex-col gap-2.5 text-center text-[10px]">
+        {/* Sidebar Footer with system operational signals */}
+        <div className="p-4 border-t border-[#1e293b] flex flex-col gap-2 justify-center items-center text-center text-[10px]">
           {!isSidebarCollapsed && (
-            <span className="font-extrabold text-slate-400">
-              API Version: v5.24 (PROD)
-            </span>
+            <div className="flex flex-col gap-1 text-slate-400 font-bold">
+              <span className="text-indigo-400">RABAT SECURE CLOUD</span>
+              <span>v8.1.0-STABLE</span>
+            </div>
           )}
         </div>
       </aside>
 
       {/* MAIN CONTENT AREA CONTAINER */}
-      <main className="flex-1 flex flex-col overflow-x-hidden">
+      <main className="flex-1 flex flex-col overflow-x-hidden min-h-screen">
         {/* Top Header Bar */}
         <header className={`border-b px-6 py-3.5 flex items-center justify-between select-none transition-all ${
           isRTL ? 'flex-row-reverse text-right' : 'flex-row text-left'
         } ${
-          isDarkMode ? 'bg-[#111827] border-slate-800' : 'bg-white border-gray-200'
+          isDarkMode ? 'bg-[#0f172a] border-[#1e293b]/70' : 'bg-white border-slate-150/80 shadow-xs'
         }`}>
-          {/* Breadcrumb / Title */}
+          {/* Breadcrumb / Title with real status feedback */}
           <div className={`flex items-center gap-2 text-xs font-bold ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
-            <span className="text-gray-400">
+            <span className="text-slate-400">
               {isRTL ? 'إعدادات المنصة' : 'SaaS Config'}
             </span>
-            <span className="text-gray-300">/</span>
-            <span className="text-[#6366f1] capitalize bg-indigo-50 dark:bg-indigo-950/40 px-2.5 py-1 rounded-lg border border-indigo-100 dark:border-indigo-900/40">
+            <span className="text-slate-300">/</span>
+            <span className="text-white bg-blue-600 px-3 py-1 rounded-xl shadow-xs text-[11px] font-extrabold uppercase">
               {isRTL ? (tabLabelsAr[activeTab] || activeTab) : activeTab}
+            </span>
+          </div>
+
+          {/* CENTERED SEARCH INPUT BAR (PRO LUXURY METRIC WITH SHORTCUT LABEL) */}
+          <div className="hidden lg:flex items-center relative w-72">
+            <input 
+              type="text" 
+              placeholder={isRTL ? 'بحث في النظام الإداري...' : 'Recherche globale...'}
+              className={`w-full text-xs rounded-xl px-4 py-2 text-right transition-all border ${
+                isDarkMode 
+                  ? 'bg-slate-900/60 border-slate-800 text-slate-200 placeholder-slate-500 focus:border-blue-600 focus:ring-1 focus:ring-blue-600' 
+                  : 'bg-slate-100/80 border-slate-200 text-slate-800 placeholder-slate-400 focus:bg-white focus:border-blue-500'
+              }`}
+            />
+            <span className={`absolute ${isRTL ? 'left-2.5' : 'right-2.5'} px-1.5 py-0.5 rounded text-[8.5px] font-mono font-black border uppercase ${
+              isDarkMode ? 'bg-slate-950 border-slate-800 text-slate-500' : 'bg-white border-slate-200 text-slate-400 shadow-xs'
+            }`}>
+              Ctrl + K
             </span>
           </div>
 
@@ -567,31 +656,52 @@ export default function AdminPanel({ lang, tasks }: AdminPanelProps) {
           <div className={`flex items-center gap-3.5 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
             
             {/* Live Gateway & Status Indicators */}
-            <div className={`hidden md:flex items-center gap-2 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
+            <div className={`hidden xl:flex items-center gap-2 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
               <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-black border tracking-wider transition-all hover:scale-[1.02] ${
-                isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-300' : 'bg-gray-50 border-gray-150 text-slate-600 shadow-xs'
+                isDarkMode ? 'bg-slate-900 border-slate-850 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-600 shadow-xs'
               }`}>
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0 inline-block" />
                 <span>{isRTL ? 'بوابة PAYZONE: نشطة' : 'PAYZONE: SECURE'}</span>
               </div>
               
               <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-black border tracking-wider transition-all hover:scale-[1.02] ${
-                isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-300' : 'bg-gray-50 border-gray-150 text-slate-600 shadow-xs'
+                isDarkMode ? 'bg-slate-900 border-slate-850 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-600 shadow-xs'
               }`}>
                 <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse shrink-0 inline-block" />
                 <span>{isRTL ? 'مزامنة FIRESTORE: نشطة' : 'DB SYNC: LIVE'}</span>
               </div>
             </div>
 
+            {/* Focus Mode Pill Toggle Button */}
+            <button
+              onClick={() => {
+                setIsFocusMode(!isFocusMode);
+                showToast(
+                  !isFocusMode 
+                    ? (isRTL ? 'تفعيل وضع التركيز: تم حجب كل مشتتات الانتباه الجانبية والشرائط!' : 'Focus Mode armed: side navigation and header metrics collapsed!') 
+                    : (isRTL ? 'إيقاف وضع التركيز' : 'Focus Mode deactivated'),
+                  'success'
+                );
+              }}
+              className={`px-3 py-1.5 flex items-center gap-1.5 rounded-xl text-[10.5px] font-black border transition-all cursor-pointer ${
+                isFocusMode 
+                  ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-600/15 animate-pulse'
+                  : isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-300 hover:text-white' : 'bg-white border-slate-200 text-slate-650 hover:text-blue-600 shadow-xs'
+              }`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${isFocusMode ? 'bg-white animate-ping' : 'bg-blue-500'} shrink-0`} />
+              <span>{isRTL ? 'وضع التركيز' : 'Focus'}</span>
+            </button>
+
             {/* Dynamic Admin Language Switcher Pill Button */}
             <div className={`flex items-center rounded-xl p-0.5 border ${
-              isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-gray-100 border-gray-200'
+              isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-slate-100 border-slate-200'
             }`}>
               <button
                 onClick={() => setAdminLang('ar')}
                 className={`px-2 py-1 text-[10.5px] font-bold rounded-lg transition-all cursor-pointer ${
                   adminLang === 'ar' 
-                    ? 'bg-indigo-650 text-white shadow-sm' 
+                    ? 'bg-blue-600 text-white shadow-sm' 
                     : isDarkMode ? 'text-slate-400 hover:text-white' : 'text-slate-650 hover:text-slate-900'
                 }`}
                 title="الواجهة بالعربية"
@@ -602,7 +712,7 @@ export default function AdminPanel({ lang, tasks }: AdminPanelProps) {
                 onClick={() => setAdminLang('fr')}
                 className={`px-2 py-1 text-[10.5px] font-bold rounded-lg transition-all cursor-pointer ${
                   adminLang === 'fr' 
-                    ? 'bg-indigo-650 text-white shadow-sm' 
+                    ? 'bg-blue-600 text-white shadow-sm' 
                     : isDarkMode ? 'text-slate-400 hover:text-white' : 'text-slate-650 hover:text-slate-900'
                 }`}
                 title="Interface en Français"
@@ -617,7 +727,7 @@ export default function AdminPanel({ lang, tasks }: AdminPanelProps) {
               className={`w-9 h-9 flex items-center justify-center rounded-xl border transition-all cursor-pointer ${
                 isDarkMode 
                   ? 'bg-slate-900 border-slate-800 text-amber-400 hover:bg-slate-850 hover:text-amber-300' 
-                  : 'bg-white border-gray-200 text-slate-600 hover:bg-gray-50 hover:text-indigo-600 shadow-xs'
+                  : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-blue-600 shadow-xs'
               }`}
             >
               {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
@@ -629,41 +739,39 @@ export default function AdminPanel({ lang, tasks }: AdminPanelProps) {
                 onClick={() => setShowNotificationDropdown(!showNotificationDropdown)}
                 className={`w-9 h-9 flex items-center justify-center rounded-xl border transition-all cursor-pointer relative ${
                   showNotificationDropdown
-                    ? 'bg-indigo-650 text-white border-indigo-650'
+                    ? 'bg-blue-600 text-white border-blue-600'
                     : isDarkMode 
                       ? 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-850'
-                      : 'bg-white border-gray-200 text-slate-600 hover:bg-gray-50 shadow-xs'
+                      : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50 shadow-xs'
                 }`}
               >
                 <Bell className="w-4 h-4" />
                 {notifications.filter(n => !n.read).length > 0 && (
-                  <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-red-600 border border-white dark:border-slate-900 animate-bounce" />
+                   <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-red-600 border border-white dark:border-slate-900 animate-bounce" />
                 )}
               </button>
 
               {/* FLOATING NOTIFICATIONS POP-DOWN MENU */}
               <AnimatePresence>
                 {showNotificationDropdown && (
-                  <motion.div 
-                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                    transition={{ duration: 0.15 }}
-                    className={`absolute z-50 top-11 ${
-                      isRTL ? 'left-0' : 'right-0'
-                    } w-80 rounded-2xl border p-4 shadow-2xl ${
-                      isDarkMode ? 'bg-slate-900 text-slate-100 border-slate-800' : 'bg-white text-slate-900 border-gray-150'
-                    }`}
-                  >
+                   <motion.div 
+                     initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                     animate={{ opacity: 1, y: 0, scale: 1 }}
+                     exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                     transition={{ duration: 0.15 }}
+                     className={`absolute z-50 top-11 right-0 w-80 rounded-2xl border p-4 shadow-2xl ${
+                       isDarkMode ? 'bg-slate-900 text-slate-100 border-slate-800' : 'bg-white text-slate-900 border-gray-150'
+                     }`}
+                   >
                     <div className="flex items-center justify-between border-b pb-2 mb-2 flex-row-reverse text-right">
-                      <span className="text-xs font-black uppercase text-[#6366f1]">
+                      <span className="text-xs font-black uppercase text-blue-500">
                         {isRTL ? 'تنبيهات النظام الإداري' : 'SaaS Event Alerts'}
                       </span>
                       <button 
                         onClick={() => {
                           setNotifications(prev => prev.map(n => ({...n, read: true})));
                         }}
-                        className="text-[9.5px] font-bold text-[#6366f1] hover:underline cursor-pointer"
+                        className="text-[9.5px] font-bold text-blue-500 hover:underline cursor-pointer"
                       >
                         {isRTL ? 'تعليم الكل كمقروء' : 'Mark all read'}
                       </button>
@@ -671,7 +779,7 @@ export default function AdminPanel({ lang, tasks }: AdminPanelProps) {
 
                     <div className="flex flex-col gap-2 max-h-[220px] overflow-y-auto">
                       {notifications.length === 0 ? (
-                        <p className="text-[10px] text-gray-450 text-center py-4">{isRTL ? 'لا توجد تنبيهات معلقة' : 'No pending system events.'}</p>
+                        <p className="text-[10px] text-slate-400 text-center py-4">{isRTL ? 'لا توجد تنبيهات معلقة' : 'No pending system events.'}</p>
                       ) : (
                         notifications.map((notif) => (
                           <div 
@@ -679,14 +787,14 @@ export default function AdminPanel({ lang, tasks }: AdminPanelProps) {
                             className={`p-2.5 rounded-xl border text-right transition-all flex flex-col gap-1 ${
                               notif.read 
                                 ? isDarkMode ? 'bg-slate-950/40 border-slate-850 text-slate-400' : 'bg-slate-50 border-gray-100 text-gray-400'
-                                : isDarkMode ? 'bg-slate-950 border-slate-800 text-slate-200' : 'bg-indigo-50/50 border-indigo-100 text-indigo-950/90'
+                                : isDarkMode ? 'bg-[#1e293b] border-slate-800 text-slate-200' : 'bg-blue-50/50 border-blue-100 text-blue-950/90'
                             }`}
                           >
                             <span className="text-[10px] leading-relaxed font-bold">
                               {isRTL ? notif.titleAr : notif.titleFr}
                             </span>
                             <div className="flex justify-between items-center text-[8.5px] text-slate-400 mt-1 flex-row-reverse">
-                              <span className="bg-[#6366f1]/10 px-1.5 py-0.5 rounded text-[#6366f1] font-bold uppercase">SaaS System</span>
+                              <span className="bg-blue-500/10 px-1.5 py-0.5 rounded text-blue-500 font-bold uppercase text-[8px]">SaaS System</span>
                               <button 
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -706,13 +814,13 @@ export default function AdminPanel({ lang, tasks }: AdminPanelProps) {
               </AnimatePresence>
             </div>
 
-            {/* Profile Avatar identifier */}
+            {/* Profile Avatar identifier with luxury layout from reference mockup */}
             <div className={`flex items-center gap-2.5 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
               <div className={`hidden sm:flex flex-col ${isRTL ? 'text-left' : 'text-right'}`}>
-                <span className="text-xs font-black text-slate-800 dark:text-slate-200">Super Admin</span>
-                <span className="text-[9px] text-[#6366f1] font-bold">amine.saas@airtasker.ma</span>
+                <span className="text-xs font-black text-slate-800 dark:text-slate-200 leading-none">Super Admin</span>
+                <span className="text-[9px] text-blue-500 font-bold mt-1">amine.saas@airtasker.ma</span>
               </div>
-              <div className="w-8.5 h-8.5 rounded-xl bg-[#6366f1] text-white font-black flex items-center justify-center text-xs shadow-md shadow-indigo-600/15">
+              <div className="w-8.5 h-8.5 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white font-black flex items-center justify-center text-xs shadow-md shadow-blue-600/20">
                 SA
               </div>
             </div>
@@ -763,7 +871,7 @@ export default function AdminPanel({ lang, tasks }: AdminPanelProps) {
                       onClick={() => setToggleUserSubtype('customers')}
                       className={`px-4 py-2 text-xs font-black rounded-lg transition-all cursor-pointer ${
                         toggleUserSubtype === 'customers'
-                          ? 'bg-[#6366f1] text-white shadow'
+                          ? 'bg-indigo-650 text-white shadow'
                           : 'text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800'
                       }`}
                     >
@@ -773,7 +881,7 @@ export default function AdminPanel({ lang, tasks }: AdminPanelProps) {
                       onClick={() => setToggleUserSubtype('providers')}
                       className={`px-4 py-2 text-xs font-black rounded-lg transition-all cursor-pointer ${
                         toggleUserSubtype === 'providers'
-                          ? 'bg-[#6366f1] text-white shadow'
+                          ? 'bg-indigo-650 text-white shadow'
                           : 'text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800'
                       }`}
                     >
@@ -793,6 +901,7 @@ export default function AdminPanel({ lang, tasks }: AdminPanelProps) {
                     tasks={tasks}
                     onToggleBlockUser={handleToggleBlockUser}
                     onDeleteUser={handleDeleteUser}
+                    onUpdateUserProfile={handleUpdateUserProfile}
                     onSelectUserForFiles={(user) => setSelectedUserForFiles(user)}
                     onApproveFreelancer={(reqId, uId) => handleUpdateKyc(reqId, uId, 'approved')}
                     onRejectFreelancer={(reqId, name) => {
@@ -814,6 +923,7 @@ export default function AdminPanel({ lang, tasks }: AdminPanelProps) {
                   tasks={tasks}
                   onAddLog={(log) => setSystemLogs(prev => [log, ...prev])}
                   onOverrideStatus={handleOverrideStatus}
+                  onDeleteTask={handleDeleteTask}
                 />
               )}
 

@@ -11,6 +11,24 @@ export interface UserProfile {
   isOnline?: boolean;
   minimumRate?: number;
   skills?: string[];
+  photoURL?: string;
+  phoneVerified?: boolean;
+  dob?: string;
+  hasDob?: boolean;
+  hasAddress?: boolean;
+  headline?: string;
+  verificationStatus?: 'none' | 'pending' | 'approved' | 'rejected';
+  identityVerified?: boolean;
+  hasBanking?: boolean;
+  profileCompletion?: number;
+  role?: string;
+  isSuperAdmin?: boolean;
+  hasSetup?: boolean;
+  profileCompleted?: boolean;
+  status?: string;
+  portfolio?: any[];
+  paymentMethods?: any[];
+  notifications?: any;
 }
 
 export interface UserPrivateInfo {

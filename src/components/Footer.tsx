@@ -33,7 +33,7 @@ interface FooterProps {
   setSelectedCategory: (cat: string) => void;
   selectedNeighborhood: string;
   setSelectedNeighborhood: (neigh: string) => void;
-  onViewChange?: (view: 'home' | 'explorer' | 'dashboard' | 'admin' | 'how-it-works') => void;
+  onViewChange?: (view: 'home' | 'explorer' | 'dashboard' | 'admin' | 'how-it-works' | 'gifts') => void;
 }
 
 export default function Footer({
@@ -247,9 +247,9 @@ export default function Footer({
               <li>
                 <button 
                   onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-                  className="text-slate-400 hover:text-[#60a5fa] text-xs font-semibold leading-relaxed transition-colors duration-200 cursor-pointer"
+                  className="text-slate-400 hover:text-[#60a5fa] text-xs font-semibold leading-relaxed transition-colors duration-200 cursor-pointer text-right w-full flex justify-end"
                 >
-                  الرئيسية
+                  {isRTL ? 'الرئيسية' : 'Accueil'}
                 </button>
               </li>
               <li>
@@ -258,9 +258,9 @@ export default function Footer({
                     const e = document.getElementById('tasks-bento-grid');
                     if (e) e.scrollIntoView({ behavior: 'smooth' });
                   }}
-                  className="text-slate-400 hover:text-[#60a5fa] text-xs font-semibold leading-relaxed transition-colors duration-200 cursor-pointer"
+                  className="text-slate-400 hover:text-[#60a5fa] text-xs font-semibold leading-relaxed transition-colors duration-200 cursor-pointer text-right w-full flex justify-end"
                 >
-                  تصفح المهام
+                  {isRTL ? 'تصفح المهام' : 'Explorer les Missions'}
                 </button>
               </li>
               <li>
@@ -269,9 +269,9 @@ export default function Footer({
                     const e = document.getElementById('navbar-post-task-trigger-btn');
                     if (e) e.click();
                   }}
-                  className="text-slate-400 hover:text-[#60a5fa] text-xs font-semibold leading-relaxed transition-colors duration-200 cursor-pointer"
+                  className="text-slate-400 hover:text-[#60a5fa] text-xs font-semibold leading-relaxed transition-colors duration-200 cursor-pointer text-right w-full flex justify-end"
                 >
-                  انشر مهمة
+                  {isRTL ? 'انشر مهمة' : 'Publier une Tâche'}
                 </button>
               </li>
               <li>
@@ -284,17 +284,17 @@ export default function Footer({
                       setActiveModal('working');
                     }
                   }}
-                  className="text-slate-400 hover:text-[#60a5fa] text-xs font-semibold leading-relaxed transition-colors duration-200 cursor-pointer"
+                  className="text-slate-400 hover:text-[#60a5fa] text-xs font-semibold leading-relaxed transition-colors duration-200 cursor-pointer text-right w-full flex justify-end"
                 >
-                  كيف يعمل Tasker
+                  {isRTL ? 'كيف يعمل Tasker' : 'Comment ça marche'}
                 </button>
               </li>
               <li>
                 <button 
                   onClick={() => setActiveModal('faq')}
-                  className="text-slate-400 hover:text-[#60a5fa] text-xs font-semibold leading-relaxed transition-colors duration-200 cursor-pointer"
+                  className="text-slate-400 hover:text-[#60a5fa] text-xs font-semibold leading-relaxed transition-colors duration-200 cursor-pointer text-right w-full flex justify-end"
                 >
-                  الأسئلة الشائعة
+                  {isRTL ? 'الأسئلة الشائعة' : 'Foire Aux Questions'}
                 </button>
               </li>
             </ul>
@@ -309,33 +309,41 @@ export default function Footer({
               <li>
                 <button 
                   onClick={() => setActiveModal('help')}
-                  className="text-slate-400 hover:text-[#60a5fa] text-xs font-semibold leading-relaxed transition-colors duration-200 cursor-pointer"
+                  className="text-slate-400 hover:text-[#60a5fa] text-xs font-semibold leading-relaxed transition-colors duration-200 cursor-pointer text-right w-full flex justify-end"
                 >
-                  مركز المساعدة
+                  {isRTL ? 'مركز المساعدة' : 'Centre d’Aide'}
                 </button>
               </li>
               <li>
                 <button 
                   onClick={() => setActiveModal('privacy')}
-                  className="text-slate-400 hover:text-[#60a5fa] text-xs font-semibold leading-relaxed transition-colors duration-200 cursor-pointer"
+                  className="text-slate-400 hover:text-[#60a5fa] text-xs font-semibold leading-relaxed transition-colors duration-200 cursor-pointer text-right w-full flex justify-end"
                 >
-                  سياسة الخصوصية
+                  {isRTL ? 'سياسة الخصوصية' : 'Politique de Confidentialité'}
                 </button>
               </li>
               <li>
                 <button 
                   onClick={() => setActiveModal('terms')}
-                  className="text-slate-400 hover:text-[#60a5fa] text-xs font-semibold leading-relaxed transition-colors duration-200 cursor-pointer"
+                  className="text-slate-400 hover:text-[#60a5fa] text-xs font-semibold leading-relaxed transition-colors duration-200 cursor-pointer text-right w-full flex justify-end"
                 >
-                  الشروط والأحكام
+                  {isRTL ? 'الشروط والأحكام' : 'Conditions Générales'}
                 </button>
               </li>
               <li>
                 <button 
                   onClick={() => setActiveModal('about')}
-                  className="text-slate-400 hover:text-[#60a5fa] text-xs font-semibold leading-relaxed transition-colors duration-200 cursor-pointer"
+                  className="text-slate-400 hover:text-[#60a5fa] text-xs font-semibold leading-relaxed transition-colors duration-200 cursor-pointer text-right w-full flex justify-end"
                 >
-                  اتصل بنا
+                  {isRTL ? 'من نحن • مهمتنا' : 'À Propos de Nous'}
+                </button>
+              </li>
+              <li>
+                <button 
+                  onClick={() => setActiveModal('contact')}
+                  className="text-slate-400 hover:text-[#60a5fa] text-xs font-semibold leading-relaxed transition-colors duration-200 cursor-pointer text-right w-full flex justify-end"
+                >
+                  {isRTL ? 'اتصل بنا' : 'Contactez-Nous'}
                 </button>
               </li>
             </ul>
@@ -359,144 +367,7 @@ export default function Footer({
               </div>
             </div>
 
-            {/* Payment partners Grid - High Fidelity Brand Logo Cards */}
-            <div className="grid grid-cols-2 xs:grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 mt-2">
-              
-              {/* Visa Logo Card */}
-              <div 
-                className="group p-3 rounded-2xl flex flex-col items-center justify-between select-none transition-all duration-300 hover:scale-[1.04] bg-white/[0.02] hover:bg-white/[0.06] border border-white/[0.05] hover:border-blue-500/30 hover:shadow-[0_0_15px_rgba(59,130,246,0.15)] h-16 min-w-[80px]"
-                title="Visa Secure Network"
-              >
-                <div className="flex items-center justify-center h-6 text-slate-400 group-hover:text-blue-400 transition-colors duration-300">
-                  <svg className="h-4 w-auto fill-current" viewBox="0 0 100 32" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M37.89 1.15L31.29 29.85H22.7L29.3 1.15H37.89ZM60.84 1.15L55.15 21.65L54.34 17.5C52.74 9.15 45.41 2.35 36.85 1.15H48.16L55.51 29.85H63.95L76.15 1.15H60.84ZM22.5 1.15L15.34 21.65L12.44 7.15C11.39 3.1 6.8 1.45 2.15 1.15H0L0.15 1.75C4.19 2.75 7.64 4.65 10.15 7.3L17.84 29.85H26.3L38.44 1.15H22.5ZM97.85 1.15H91.19C84.95 1.15 81.35 4.8 81.35 10.3C81.35 18.25 91.95 18.7 91.95 23.35C91.95 25.1 90.05 26.65 86.45 26.65C81.45 26.65 77.4 24.55 75.3 23.35L74.1 22.65L72.95 28.5C76.2 30.15 81.15 31.15 86.15 31.15C93.45 31.15 99.85 27.25 99.85 20.35C99.85 11.5 89.15 11.05 89.15 7.15C89.15 5.8 90.5 4.45 93.65 4.45C97.75 4.45 101.3 6.1 103.1 7.15L104.2 7.8L105.3 1.95C102.95 1.15 100.41 1.15 97.85 1.15Z"/>
-                  </svg>
-                </div>
-                <span className="text-[7.5px] font-sans font-extrabold text-slate-500 group-hover:text-blue-300 transition-colors duration-300 tracking-wider">VISA SECURE</span>
-              </div>
 
-              {/* Mastercard Logo Card */}
-              <div 
-                className="group p-3 rounded-2xl flex flex-col items-center justify-between select-none transition-all duration-300 hover:scale-[1.04] bg-white/[0.02] hover:bg-white/[0.06] border border-white/[0.05] hover:border-blue-500/30 hover:shadow-[0_0_15px_rgba(59,130,246,0.15)] h-16 min-w-[80px]"
-                title="Mastercard Identity Check"
-              >
-                <div className="flex items-center justify-center h-6 text-slate-400 group-hover:text-blue-400 transition-colors duration-300">
-                  <svg className="h-6 w-auto stroke-none fill-current" viewBox="0 0 24 16" xmlns="http://www.w3.org/2000/svg">
-                    <circle cx="7.5" cy="8" r="6" opacity="0.6"/>
-                    <circle cx="16.5" cy="8" r="6" opacity="0.9"/>
-                    <path d="M12 2.1A6 6 0 0 0 12 13.9A6 6 0 0 0 12 2.1Z" opacity="0.8"/>
-                  </svg>
-                </div>
-                <span className="text-[7.5px] font-sans font-extrabold text-slate-500 group-hover:text-blue-300 transition-colors duration-300 tracking-wider">MASTERD ID</span>
-              </div>
-
-              {/* CMI Card */}
-              <div 
-                className="group p-3 rounded-2xl flex flex-col items-center justify-between select-none transition-all duration-300 hover:scale-[1.04] bg-white/[0.02] hover:bg-white/[0.06] border border-white/[0.05] hover:border-blue-500/30 hover:shadow-[0_0_15px_rgba(59,130,246,0.15)] h-16 min-w-[80px]"
-                title="CMI (Centre Monétique Interbancaire) - Morocco"
-              >
-                <div className="flex items-center justify-center h-6 text-slate-400 group-hover:text-blue-400 transition-colors duration-300">
-                  <svg className="h-5 w-auto stroke-current fill-none" viewBox="0 0 80 24" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M4 12C4 7.58 7.58 4 12 4" strokeWidth="2.5" strokeLinecap="round"/>
-                    <path d="M9 12C9 9 11 7 14 7" strokeWidth="2.5" strokeLinecap="round"/>
-                    <ellipse cx="14" cy="14" rx="2" ry="2" className="fill-current"/>
-                    <text x="24" y="17" className="fill-current font-black italic text-[13px] tracking-tight font-sans" stroke="none">cmi</text>
-                  </svg>
-                </div>
-                <span className="text-[7.5px] font-sans font-extrabold text-slate-500 group-hover:text-blue-300 transition-colors duration-300 tracking-wider">{isRTL ? 'مضمونة CMI' : 'AGRÉÉ CMI'}</span>
-              </div>
-
-              {/* CIH Bank Logo Card */}
-              <div 
-                className="group p-3 rounded-2xl flex flex-col items-center justify-between select-none transition-all duration-300 hover:scale-[1.04] bg-white/[0.02] hover:bg-white/[0.06] border border-white/[0.05] hover:border-blue-500/30 hover:shadow-[0_0_15px_rgba(59,130,246,0.15)] h-16 min-w-[80px]"
-                title="CIH Bank (سياش بنك)"
-              >
-                <div className="flex items-center justify-center h-6 text-slate-400 group-hover:text-blue-400 transition-colors duration-300">
-                  <svg className="h-4.5 w-auto fill-current" viewBox="0 0 100 24" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M5 4 H15 L11 20 H1 Z" opacity="0.6" />
-                    <path d="M13 4 H23 L19 20 H9 Z" opacity="0.9" />
-                    <text x="28" y="15" className="fill-current font-black text-[11px] font-sans" stroke="none">CIH</text>
-                    <text x="28" y="21" className="fill-current font-bold text-[6px] opacity-85 font-sans" stroke="none">BANK</text>
-                  </svg>
-                </div>
-                <span className="text-[7.5px] font-sans font-extrabold text-slate-500 group-hover:text-blue-300 transition-colors duration-300 tracking-wider">{isRTL ? 'سياش موبايل' : 'CIH MOBILE'}</span>
-              </div>
-
-              {/* Attijariwafa Bank Logo Card */}
-              <div 
-                className="group p-3 rounded-2xl flex flex-col items-center justify-between select-none transition-all duration-300 hover:scale-[1.04] bg-white/[0.02] hover:bg-white/[0.06] border border-white/[0.05] hover:border-blue-500/30 hover:shadow-[0_0_15px_rgba(59,130,246,0.15)] h-16 min-w-[80px]"
-                title="Attijariwafa Bank (التجاري وفا بنك)"
-              >
-                <div className="flex items-center justify-center h-6 text-slate-400 group-hover:text-blue-400 transition-colors duration-300">
-                  <svg className="h-5.5 w-auto fill-current" viewBox="0 0 120 28" xmlns="http://www.w3.org/2000/svg">
-                    <g transform="translate(13, 14)">
-                      <circle cx="0" cy="0" r="4.5" />
-                      <path d="M-6 -6 L6 -6 L6 6 L-6 6 Z" opacity="0.6" transform="rotate(22.5)" />
-                      <path d="M-6 -6 L6 -6 L6 6 L-6 6 Z" transform="rotate(67.5)" />
-                    </g>
-                    <text x="25" y="12" className="fill-current font-sans font-black text-[9px] tracking-tight" stroke="none">Attijariwafa</text>
-                    <text x="25" y="20" className="fill-current font-sans font-black text-[7.5px] tracking-wide" stroke="none">bank</text>
-                  </svg>
-                </div>
-                <span className="text-[7.5px] font-sans font-extrabold text-slate-500 group-hover:text-blue-300 transition-colors duration-300 tracking-wider">{isRTL ? 'وفا آمن' : 'WAFA NET'}</span>
-              </div>
-
-              {/* Banque Populaire Logo Card */}
-              <div 
-                className="group p-3 rounded-2xl flex flex-col items-center justify-between select-none transition-all duration-300 hover:scale-[1.04] bg-white/[0.02] hover:bg-white/[0.06] border border-white/[0.05] hover:border-blue-500/30 hover:shadow-[0_0_15px_rgba(59,130,246,0.15)] h-16 min-w-[80px]"
-                title="Groupe Banque Populaire (البنك الشعبي)"
-              >
-                <div className="flex items-center justify-center h-6 text-slate-400 group-hover:text-blue-400 transition-colors duration-300">
-                  <svg className="h-5.5 w-auto fill-current" viewBox="0 0 120 28" xmlns="http://www.w3.org/2000/svg">
-                    <circle cx="14" cy="14" r="10.5" opacity="0.6" />
-                    <circle cx="14" cy="14" r="7.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
-                    <path d="M10 16.5 C10.5 15.5, 11.5 13.5, 13 12 C14.5 10.5, 15.5 10, 16.5 10 C17 10, 18 11, 18.5 12 C18 12, 17.5 11.5, 16.5 11.5 C15.5 11.5, 14 12, 13.5 13.5 C13 15, 12 16, 11 16.5 Z" />
-                    <text x="29" y="12" className="fill-current font-sans font-black text-[9.5px]" stroke="none">CHAABI</text>
-                    <text x="29" y="20" className="fill-current font-sans font-bold text-[7px]" stroke="none">POPULAIRE</text>
-                  </svg>
-                </div>
-                <span className="text-[7.5px] font-sans font-extrabold text-slate-500 group-hover:text-blue-300 transition-colors duration-300 tracking-wider">{isRTL ? 'الشعبي نت' : 'CHAABI PAY'}</span>
-              </div>
-
-              {/* Bank Of Africa Logo Card */}
-              <div 
-                className="group p-3 rounded-2xl flex flex-col items-center justify-between select-none transition-all duration-300 hover:scale-[1.04] bg-white/[0.02] hover:bg-white/[0.06] border border-white/[0.05] hover:border-blue-500/30 hover:shadow-[0_0_15px_rgba(59,130,246,0.15)] h-16 min-w-[80px]"
-                title="Bank Of Africa - Groupe BMCE (بنك إفريقيا)"
-              >
-                <div className="flex items-center justify-center h-6 text-slate-400 group-hover:text-blue-400 transition-colors duration-300">
-                  <svg className="h-5.5 w-auto stroke-current fill-none" viewBox="0 0 120 28" xmlns="http://www.w3.org/2000/svg">
-                    <circle cx="14" cy="14" r="9.5" className="fill-current" stroke="none" opacity="0.4" />
-                    <circle cx="14" cy="14" r="8.5" strokeWidth="1" />
-                    <ellipse cx="14" cy="14" rx="8.5" ry="3.5" strokeWidth="1" />
-                    <ellipse cx="14" cy="14" rx="3.5" ry="8.5" strokeWidth="1" />
-                    <path d="M7 17 C9 12, 18 9, 21 14" strokeWidth="1.8" strokeLinecap="round" />
-                    <text x="27" y="12" className="fill-current font-sans font-black text-[7.5px] tracking-tight" stroke="none">BANK OF</text>
-                    <text x="27" y="20" className="fill-current font-sans font-black text-[8px] tracking-wide" stroke="none">AFRICA</text>
-                  </svg>
-                </div>
-                <span className="text-[7.5px] font-sans font-extrabold text-slate-500 group-hover:text-blue-300 transition-colors duration-300 tracking-wider">{isRTL ? 'بنك إفريقيا' : 'BOA DIRECT'}</span>
-              </div>
-
-              {/* BMCI BNP Paribas Group */}
-              <div 
-                className="group p-3 rounded-2xl flex flex-col items-center justify-between select-none transition-all duration-300 hover:scale-[1.04] bg-white/[0.02] hover:bg-white/[0.06] border border-white/[0.05] hover:border-blue-500/30 hover:shadow-[0_0_15px_rgba(59,130,246,0.15)] h-16 min-w-[80px]"
-                title="BMCI - Groupe BNP Paribas (البنك المغربي للتجارة والصناعة)"
-              >
-                <div className="flex items-center justify-center h-6 text-slate-400 group-hover:text-blue-400 transition-colors duration-300">
-                  <svg className="h-5.5 w-auto fill-current" viewBox="0 0 120 28" xmlns="http://www.w3.org/2000/svg">
-                    <text x="2" y="14" className="fill-current font-sans font-black text-[13px]" stroke="none">BMCI</text>
-                    <text x="2" y="22" className="fill-current font-sans font-extrabold text-[6.2px] opacity-80" stroke="none">BNP PARIBAS</text>
-                    <g className="fill-current">
-                      <path d="M54 12 L55.5 15.5 L59 15.5 L56 17.5 L57.5 21 L54 19 L50.5 21 L52 17.5 L49 15.5 L52.5 15.5 Z" />
-                      <path d="M66 9 L67.2 11.8 L70 11.8 L67.6 13.4 L68.8 16.2 L66 14.6 L63.2 16.2 L64.4 13.4 L62 11.8 L64.8 11.8 Z" opacity="0.85" />
-                      <path d="M76 7 L77 9 L79.2 9 L77.4 10.2 L78.2 12.2 L76 11 L73.8 12.2 L74.6 10.2 L72.8 9 L75 9 Z" opacity="0.7" />
-                    </g>
-                  </svg>
-                </div>
-                <span className="text-[7.5px] font-sans font-extrabold text-slate-500 group-hover:text-blue-300 transition-colors duration-300 tracking-wider">{isRTL ? 'مجموعة باريبا' : 'BMCI SECURE'}</span>
-              </div>
-
-            </div>
           </div>
 
         </div>
@@ -633,26 +504,26 @@ export default function Footer({
       {/* Interactive Detail Overlays */}
       {activeModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-sm text-gray-950" id="footer-details-modal">
-          <div className="w-full max-w-lg bg-white rounded-3xl shadow-2xl relative overflow-hidden flex flex-col text-right">
+          <div className={`w-full max-w-lg bg-white rounded-3xl shadow-2xl relative overflow-hidden flex flex-col ${isRTL ? 'text-right' : 'text-left'}`} dir={isRTL ? 'rtl' : 'ltr'}>
             
-            <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between bg-slate-50">
+            <div className={`px-6 py-5 border-b border-gray-100 flex items-center justify-between bg-slate-50 ${isRTL ? 'flex-row' : 'flex-row-reverse'}`}>
               <button 
                 onClick={() => {
                   setActiveModal(null);
                   setContactSuccess(false);
                 }}
-                className="p-1.5 rounded-lg hover:bg-gray-250 text-gray-500 cursor-pointer"
+                className="p-1.5 rounded-lg hover:bg-gray-200 text-gray-500 cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
               <h3 className="text-sm font-black text-slate-900">
-                {activeModal === 'about' && 'من نحن • مهمات المغرب'}
-                {activeModal === 'contact' && 'اتصل بنا المساعد المباشر'}
-                {activeModal === 'privacy' && 'سياسة حماية البيانات والخصوصية'}
-                {activeModal === 'terms' && 'اتفاقية شروط استخدام المنصة'}
-                {activeModal === 'working' && 'كيف يعمل نظام Tasker العملي'}
-                {activeModal === 'faq' && 'الأسئلة الشائعة والإرشادات'}
-                {activeModal === 'help' && 'مركز المساعدة وقواعد الأمان'}
+                {activeModal === 'about' && (isRTL ? 'من نحن • مهمة منصتنا' : 'À Propos • Notre Mission')}
+                {activeModal === 'contact' && (isRTL ? 'اتصل بنا المساعد المباشر' : 'Contactez Notre Support en Direct')}
+                {activeModal === 'privacy' && (isRTL ? 'سياسة حماية البيانات والخصوصية' : 'Politique de Confidentialité')}
+                {activeModal === 'terms' && (isRTL ? 'اتفاقية شروط استخدام المنصة' : 'Conditions Générales d’Utilisation')}
+                {activeModal === 'working' && (isRTL ? 'كيف يعمل نظام Tasker العملي' : 'Comment fonctionne Tasker')}
+                {activeModal === 'faq' && (isRTL ? 'الأسئلة الشائعة والإرشادات' : 'Questions Fréquentes & Aide')}
+                {activeModal === 'help' && (isRTL ? 'مركز المساعدة وقواعد الأمان' : 'Centre d’Aide & Sécurité')}
               </h3>
             </div>
 
@@ -661,13 +532,19 @@ export default function Footer({
               {activeModal === 'about' && (
                 <div className="flex flex-col gap-3">
                   <div className="p-3.5 bg-blue-50 text-blue-900 rounded-xl border border-blue-100 italic">
-                    تم تطوير منصة مهمات Tasker برعاية تكنولوجية محترفة لتوثيق الثقة وعمليات السداد الخدمي المنزلي في رباط الخير وسائر مدن المملكة.
+                    {isRTL 
+                      ? 'تم تطوير منصة مهمات Tasker برعاية تكنولوجية محترفة لتوثيق الثقة وعمليات السداد الخدمي المنزلي في رباط الخير وسائر مدن المملكة.' 
+                      : 'La plateforme Tasker a été développée pour garantir la confiance et la sécurité des paiements pour les services à domicile à Rabat et dans tout le Royaume.'}
                   </div>
                   <p>
-                    مهمتنا هي تمكين كل أسرة تبحث عن خدمة منزلية ممتازة كالسباكة والتنظيف والمربيات، من العثور على شريك متميز وموثوق يحمل بطاقة الهوية المؤكدة.
+                    {isRTL 
+                      ? 'مهمتنا هي تمكين كل أسرة تبحث عن خدمة منزلية ممتازة كالسباكة والتنظيف والمربيات، من العثور على شريك متميز وموثوق يحمل بطاقة الهوية المؤكدة.' 
+                      : 'Notre mission est de permettre à chaque foyer de trouver un prestataire qualifié (plomberie, ménage, électricité, etc.) dont l’identité a été rigoureusement vérifiée.'}
                   </p>
                   <p>
-                    تتميز المنصة بدعم حقيقي وتأمين مشفر للودائع المباشرة لحماية حقوق والتزامات الطرفين.
+                    {isRTL 
+                      ? 'تتميز المنصة بدعم حقيقي وتأمين مشفر للودائع المباشرة لحماية حقوق والتزامات الطرفين.' 
+                      : 'La plateforme se distingue par un support de qualité et un système de séquestre sécurisé protégeant les transactions pour les deux parties.'}
                   </p>
                 </div>
               )}
@@ -675,17 +552,23 @@ export default function Footer({
               {activeModal === 'contact' && (
                 <div className="flex flex-col gap-4">
                   <p>
-                    الرجاء تعبئة النموذج أدناه للتواصل مباشرة مع إدارة الدعم الفني لمهمات Tasker. سيقوم فريقنا بالرد عليك خلال أقل من 12 ساعة.
+                    {isRTL 
+                      ? 'الرجاء تعبئة النموذج أدناه للتواصل مباشرة مع إدارة الدعم الفني لمهمات Tasker. سيقوم فريقنا بالرد عليك خلال أقل من 12 ساعة.' 
+                      : 'Veuillez remplir le formulaire ci-dessous pour contacter le support de Tasker. Notre équipe vous répondra sous 12h.'}
                   </p>
                   
                   {contactSuccess ? (
                     <div className="p-4 bg-emerald-50 text-emerald-800 rounded-2xl border border-emerald-100 text-center font-bold">
-                      ✓ تم إرسال رسالتك بنجاح! شكراً للتواصل، سنقوم بالرد على بريدك الإلكتروني.
+                      {isRTL 
+                        ? '✓ تم إرسال رسالتك بنجاح! شكراً للتواصل، سنقوم بالرد على بريدك الإلكتروني.' 
+                        : '✓ Message envoyé avec succès ! Nous vous recontacterons par email rapidement.'}
                     </div>
                   ) : (
                     <form onSubmit={handleContactSubmit} className="flex flex-col gap-3">
                       <div className="flex flex-col gap-1">
-                        <label className="text-gray-700 font-bold">البريد الإلكتروني للرد</label>
+                        <label className="text-gray-700 font-bold">
+                          {isRTL ? 'البريد الإلكتروني للرد' : 'Votre adresse e-mail'}
+                        </label>
                         <input 
                           type="email"
                           required
@@ -696,13 +579,15 @@ export default function Footer({
                         />
                       </div>
                       <div className="flex flex-col gap-1">
-                        <label className="text-gray-700 font-bold">نص الرسالة أو استفسار الشكوى</label>
+                        <label className="text-gray-700 font-bold">
+                          {isRTL ? 'نص الرسالة أو استفسار الشكوى' : 'Votre message ou réclamation'}
+                        </label>
                         <textarea 
                           rows={4}
                           required
                           value={contactMsg}
                           onChange={e => setContactMsg(e.target.value)}
-                          placeholder="يرجى كتابة كافة تفاصيل طلبكم..."
+                          placeholder={isRTL ? 'يرجى كتابة كافة تفاصيل طلبكم...' : 'Veuillez décrire votre demande en détail...'}
                           className="w-full p-2.5 border border-gray-200 rounded-xl text-xs focus:ring-1 focus:ring-blue-500"
                         />
                       </div>
@@ -711,20 +596,24 @@ export default function Footer({
                         disabled={submitting}
                         className="w-full bg-slate-900 text-white font-extrabold py-3 rounded-xl hover:bg-slate-950 transition-colors cursor-pointer"
                       >
-                        {submitting ? 'جاري الإرسال...' : 'إرسال الرسالة الآمنة لخدمة العملاء'}
+                        {submitting 
+                          ? (isRTL ? 'جاري الإرسال...' : 'Envoi en cours...') 
+                          : (isRTL ? 'إرسال الرسالة الآمنة لخدمة العملاء' : 'Envoyer le message sécurisé')}
                       </button>
                     </form>
                   )}
 
-                  <div className="mt-2 pt-3 border-t border-gray-100 flex flex-col gap-2 text-right">
-                    <span className="text-gray-450 text-[10px]">العنوان الإداري للمنصة:</span>
-                    <span className="font-bold text-slate-800 flex items-center gap-1.5 justify-end">
-                      <span>شارع النخيل، حي الرياض، الرباط، المغرب</span>
-                      <MapPin className="w-4 h-4 text-blue-500 shrink-0" />
+                  <div className={`mt-2 pt-3 border-t border-gray-100 flex flex-col gap-2 ${isRTL ? 'text-right' : 'text-left'}`}>
+                    <span className="text-gray-400 text-[10px]">{isRTL ? 'العنوان الإداري للمنصة:' : 'Adresse administrative :'}</span>
+                    <span className={`font-bold text-slate-800 flex items-center gap-1.5 ${isRTL ? 'justify-end' : 'justify-start'}`}>
+                      {!isRTL && <MapPin className="w-4 h-4 text-blue-500 shrink-0" />}
+                      <span>{isRTL ? 'شارع النخيل، حي الرياض، الرباط، المغرب' : 'Avenue des Palmiers, Hay Riad, Rabat, Maroc'}</span>
+                      {isRTL && <MapPin className="w-4 h-4 text-blue-500 shrink-0" />}
                     </span>
-                    <span className="font-bold text-slate-800 flex items-center gap-1.5 justify-end">
-                      <span>+212 537-778899</span>
-                      <Phone className="w-4 h-4 text-emerald-500 shrink-0" />
+                    <span className={`font-bold text-slate-800 flex items-center gap-1.5 ${isRTL ? 'justify-end' : 'justify-start'}`}>
+                      {!isRTL && <Phone className="w-4 h-4 text-emerald-500 shrink-0" />}
+                      <span dir="ltr">+212 537-778899</span>
+                      {isRTL && <Phone className="w-4 h-4 text-emerald-500 shrink-0" />}
                     </span>
                   </div>
                 </div>
@@ -733,13 +622,19 @@ export default function Footer({
               {activeModal === 'privacy' && (
                 <div className="flex flex-col gap-3">
                   <p>
-                    خصوصية سكان عاصمتنا هي حجر الأساس ومطلبنا الدائم. لا نقوم بمشاركة أرقام الهواتف أو معلومات الهوية الخاصة مع العامة أبداً.
+                    {isRTL 
+                      ? 'خصوصية سكان عاصمتنا هي حجر الأساس ومطلبنا الدائم. لا نقوم بمشاركة أرقام الهواتف أو معلومات الهوية الخاصة مع العامة أبداً.' 
+                      : 'La confidentialité des données de nos utilisateurs est notre priorité absolue. Nous ne partageons jamais vos coordonnées téléphoniques ou vos pièces d’identité publiquement.'}
                   </p>
                   <p>
-                    يتم فقط تبادل وسائل الاتصال بعد موافقة العميل على عرض السعر ومصادقة المشرف لضمان عدم حدوث أي حرج.
+                    {isRTL 
+                      ? 'يتم فقط تبادل وسائل الاتصال بعد موافقة العميل على عرض السعر ومصادقة المشرف لضمان عدم حدوث أي حرج.' 
+                      : 'Les informations de contact ne sont communiquées qu’après votre acceptation d’une offre d’un artisan qualifié.'}
                   </p>
                   <p>
-                    جميع أصول البيانات والوثائق يتم تخزينها وتشفيرها محلياً وفقاً لقواعد حماية المعطيات الشخصية المعتمدة بالمغرب.
+                    {isRTL 
+                      ? 'جميع أصول البيانات والوثائق يتم تخزينها وتشفيرها محلياً وفقاً لقواعد حماية المعطيات الشخصية المعتمدة بالمغرب.' 
+                      : 'Toutes les données personnelles sont stockées et chiffrées conformément aux exigences de la CNDP aux normes marocaines de protection des données.'}
                   </p>
                 </div>
               )}
@@ -747,56 +642,93 @@ export default function Footer({
               {activeModal === 'terms' && (
                 <div className="flex flex-col gap-3">
                   <p>
-                    نظام التشغيل يعتمد كلياً على الالتزام والأمانة المغربية الأصيلة، والمصلحة المشتركة المتبادلة بين الحرفي وطالب الخدمة.
+                    {isRTL 
+                      ? 'نظام التشغيل يعتمد كلياً على الالتزام والأمانة المغربية الأصيلة، والمصلحة المشتركة المتبادلة بين الحرفي وطالب الخدمة.' 
+                      : 'Notre plateforme repose sur l’intégrité, la confiance et le respect mutuel entre les prestataires indépendants et leurs clients.'}
                   </p>
                   <p>
-                    يتعهد الحرفيون باتمام المهام بالأسعار والجودة والمواعيد المحددة بدقة.
+                    {isRTL 
+                      ? 'يتعهد الحرفيون باتمام المهام بالأسعار والجودة والمواعيد المحددة بدقة.' 
+                      : 'Les artisans partenaires s’engagent à exécuter les travaux selon les tarifs acceptés et les délais convenus d’un commun accord.'}
                   </p>
                   <p>
-                    يحق للمشرف حجز أو إلغاء الصفقات غير المكتملة وإرجاع تكاليف الضمان الفوري لأصحابها.
+                    {isRTL 
+                      ? 'يحق للمشرف حجز أو إلغاء الصفقات غير المكتملة وإرجاع تكاليف الضمان الفوري لأصحابها.' 
+                      : 'La plateforme conserve les fonds sous séquestre sécurisé. En cas de litige non résolu, le montant peut être restitué au client après vérification administrative.'}
                   </p>
                 </div>
               )}
 
               {activeModal === 'working' && (
                 <div className="flex flex-col gap-3">
-                  <p className="font-bold text-blue-650">نظام بسيط وسلس في ٣ خطوات:</p>
+                  <p className="font-bold text-blue-600">{isRTL ? 'نظام بسيط وسلس في ٣ خطوات:' : 'Un fonctionnement simple en 3 étapes :'}</p>
                   <ul className="list-decimal list-inside space-y-2">
-                    <li><strong className="text-slate-900">انشر مهمتك مجاناً:</strong> حدد موقعك، الميزانية والتفاصيل المطلوبة بدقائق.</li>
-                    <li><strong className="text-slate-900">اختر العرض الأنسب:</strong> استقبل عروض أسعار من حرفيين موثوقين وموثقين.</li>
-                    <li><strong className="text-slate-900">سدد بأمان واسترخ:</strong> يدفع المبلغ فيSéquestre آمن ولا يسلم للحرفي إلا بعد تسليم العمل بنجاح.</li>
+                    {isRTL ? (
+                      <>
+                        <li><strong className="text-slate-900">انشر مهمتك مجاناً:</strong> حدد موقعك، الميزانية والتفاصيل المطلوبة بدقائق.</li>
+                        <li><strong className="text-slate-900">اختر العرض الأنسب:</strong> استقبل عروض أسعار من حرفيين موثوقين وموثقين.</li>
+                        <li><strong className="text-slate-900">سدد بأمان واسترخ:</strong> يدفع المبلغ فيSéquestre آمن ولا يسلم للحرفي إلا بعد تسليم العمل بنجاح.</li>
+                      </>
+                    ) : (
+                      <>
+                        <li><strong className="text-slate-900">Publiez gratuitement :</strong> Décrivez vos besoins, votre zone (Rabat et environs) et votre budget.</li>
+                        <li><strong className="text-slate-900">Comparez les offres :</strong> Recevez des propositions directes d’artisans fiables dont l’identité a été validée.</li>
+                        <li><strong className="text-slate-900">Libérez après satisfaction :</strong> Votre paiement reste au chaud sous séquestre sécurisé et n’est versé au prestataire qu’une fois la tâche finie et validée.</li>
+                      </>
+                    )}
                   </ul>
                 </div>
               )}
 
               {activeModal === 'faq' && (
                 <div className="flex flex-col gap-4">
-                  <div>
-                    <h5 className="font-black text-slate-900 text-xs mb-1">هل التسجيل مجاني للعملاء؟</h5>
-                    <p className="text-gray-600">نعم، التسجيل ونشر الصفقات مجاني تماماً بنسبة مئة في المئة.</p>
-                  </div>
-                  <div>
-                    <h5 className="font-black text-slate-900 text-xs mb-1">كيف تتم عملية توثيق الحرفيين؟</h5>
-                    <p className="text-gray-600">نطلب بطاقة الهوية الوطنية، فحص السجل المهني وحضور ورشة تدريب تقنية لضمان الكفاءة والأخلاق.</p>
-                  </div>
-                  <div>
-                    <h5 className="font-black text-slate-900 text-xs mb-1">ماذا أفعل إن واجهت مشكلة؟</h5>
-                    <p className="text-gray-600">يمكنك رفع شكوى فوراً لفض النزاع إدارياً عبر لوحة التحكم، وسيتدخل المشرف بمهنية للفصل.</p>
-                  </div>
+                  {isRTL ? (
+                    <>
+                      <div>
+                        <h5 className="font-black text-slate-900 text-xs mb-1">هل التسجيل مجاني للعملاء؟</h5>
+                        <p className="text-gray-600">نعم، التسجيل ونشر الصفقات مجاني تماماً بنسبة مئة في المئة.</p>
+                      </div>
+                      <div>
+                        <h5 className="font-black text-slate-900 text-xs mb-1">كيف تتم عملية توثيق الحرفيين؟</h5>
+                        <p className="text-gray-650">نطلب بطاقة الهوية الوطنية، فحص السجل المهني وحضور ورشة تدريب تقنية لضمان الكفاءة والأخلاق.</p>
+                      </div>
+                      <div>
+                        <h5 className="font-black text-slate-900 text-xs mb-1">ماذا أفعل إن واجهت مشكلة؟</h5>
+                        <p className="text-gray-655">يمكنك رفع شكوى فوراً لفض النزاع إدارياً عبر لوحة التحكم، وسيتدخل المشرف بمهنية للفصل.</p>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div>
+                        <h5 className="font-black text-slate-900 text-xs mb-1">Est-ce gratuit d’utiliser la plateforme ?</h5>
+                        <p className="text-gray-600">Oui, l’inscription et la publication de projets sont entièrement gratuites à 100%.</p>
+                      </div>
+                      <div>
+                        <h5 className="font-black text-slate-900 text-xs mb-1">Comment sont vérifiés les prestataires (Taskers) ?</h5>
+                        <p className="text-gray-650">Nous exigeons le scan de la CIN, un contrôle des références et, si nécessaire, un entretien technique individuel.</p>
+                      </div>
+                      <div>
+                        <h5 className="font-black text-slate-900 text-xs mb-1">Que se passe-t-il en cas de problème sur un chantier ?</h5>
+                        <p className="text-gray-650">Notre équipe de support client intervient comme tiers de confiance pour analyser le litige et débloquer la situation équitablement.</p>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
 
               {activeModal === 'help' && (
                 <div className="flex flex-col gap-3">
                   <p>
-                    نوفر لجميع شركائنا في المغرب حماية مطلقة. لحجز موعد دعم عاجل أو طلب استشارة إدارية، يرجى التوجه لقسم الرسائل الفورية أو الاتصال بالرقم الأخضر المتاح طيلة اليوم.
+                    {isRTL 
+                      ? 'نوفر لجميع شركائنا في المغرب حماية مطلقة. لحجز موعد دعم عاجل أو طلب استشارة إدارية، يرجى التوجه لقسم الرسائل الفورية أو الاتصال بالرقم الأخضر المتاح طيلة اليوم.' 
+                      : 'Nous garantissons un environnement d’échange sécurisé. Pour toute demande d’assistance urgente ou de médiation, notre ligne d’aide directe (le numéro vert) et notre chat interactif restent opérationnels 24h/24.'}
                   </p>
                 </div>
               )}
 
             </div>
 
-            <div className="p-4 bg-slate-50 border-t border-gray-100 flex justify-end">
+            <div className={`p-4 bg-slate-50 border-t border-gray-100 flex ${isRTL ? 'justify-end' : 'justify-start'}`}>
               <button 
                 onClick={() => {
                   setActiveModal(null);
@@ -804,7 +736,7 @@ export default function Footer({
                 }}
                 className="px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold cursor-pointer"
               >
-                إغلاق
+                {isRTL ? 'إغلاق' : 'Fermer'}
               </button>
             </div>
 

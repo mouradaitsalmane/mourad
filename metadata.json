@@ -1,6 +1,6 @@
 {
   "name": "Tasker",
   "description": "منصة وطنية في الرباط لربط طالبي الخدمات والمهام مع مقدميها المحليين بكل ثقة وأمان باستخدام قواعد بيانات فيربيز باسم Tasker.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["geolocation"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

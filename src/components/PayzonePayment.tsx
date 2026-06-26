@@ -14,8 +14,6 @@ import {
   QrCode
 } from 'lucide-react';
 import { LanguageKey, TRANSLATIONS } from '../data/rabatData';
-import { doc, updateDoc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../lib/firebase';
 import FintechLogo from './FintechLogo';
 
 interface PayzonePaymentProps {
@@ -175,47 +173,32 @@ export default function PayzonePayment({
       setLoading(true);
       setErrorMsg(null);
 
-      // Perform transaction updates on Firestore
-      if (paymentType === 'badge') {
-        const userRef = doc(db, 'users', userUid);
-        await updateDoc(userRef, {
-          isVerifiedTasker: true,
-          isPremium: true,
-          badgeUnlockedAt: serverTimestamp()
-        });
-      } else if (paymentType === 'escrow' && taskId) {
-        const taskRef = doc(db, 'tasks', taskId);
-        await updateDoc(taskRef, {
-          isEscrowFunded: true,
-          escrowStatus: 'funded',
-          depositTransactionId: transactionId,
-          fundedAmount: amount,
-          fundedAt: serverTimestamp()
-        });
-      }
-
-      // Record transaction reference log
-      const transId = transactionId || `TX_MOCK_PAYZONE_${Date.now()}`;
-      await setDoc(doc(db, 'transactions', transId), {
-        id: transId,
-        userUid,
-        userEmail,
-        amount,
-        paymentType,
-        taskId: taskId || null,
-        merchantId: merchantId || '881293',
-        status: 'SUCCESS',
-        gateway: 'PAYZONE_MOROCCO',
-        currency: 'MAD',
-        signature,
-        createdAt: serverTimestamp()
+      const response = await fetch('/api/payzone/finalize', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          userUid,
+          paymentType,
+          taskId: taskId || null,
+          transactionId: transactionId || `TX_SECURE_PAYZONE_${Date.now()}`,
+          amount,
+          signature: signature || '',
+          userEmail: userEmail || ''
+        })
       });
+
+      const resData = await response.json();
+      if (!response.ok || !resData.success) {
+        throw new Error(resData.error || 'Failed to verify transaction securely on Rabat gateway.');
+      }
 
       setLoading(false);
       setStep(4);
     } catch (err: any) {
       console.error(err);
-      setErrorMsg(isRTL ? 'فشل توثيق الدفع في قاعدة بيانات فيربيز.' : 'Erreur lors du traitement final.');
+      setErrorMsg(isRTL ? `فشل سحب/توثيق الدفع بشكل آمن: ${err.message}` : `Erreur de finalisation sécurisée: ${err.message}`);
       setLoading(false);
     }
   };
@@ -499,7 +482,7 @@ export default function PayzonePayment({
                   </p>
                 </div>
 
-                <div className="bg-slate-50 border border-gray-150-300 w-full rounded-2xl p-3.5 mt-2 text-xs font-semibold flex flex-col gap-1.5 text-right font-mono">
+                <div className="bg-slate-50 border border-gray-200 w-full rounded-2xl p-3.5 mt-2 text-xs font-semibold flex flex-col gap-1.5 text-right font-mono">
                   <div className="flex justify-between">
                     <span className="text-gray-400">{isRTL ? 'المستلم:' : 'Marchand:'}</span>
                     <span className="text-slate-800 font-bold">Tasker Morocco</span>

@@ -1,0 +1,58 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // 1. User Profile Photos (e.g., Avatar, profile image)
+    // Accessible by the owner and administrators for moderation.
+    match /users/{userId}/profile/{allPaths=**} {
+      allow read: if request.auth != null && (request.auth.uid == userId || request.auth.token.admin == true);
+      
+      // Allow only valid images up to 5MB
+      allow create, update: if request.auth != null 
+                            && request.auth.uid == userId 
+                            && request.resource.contentType.matches('image/.*')
+                            && request.resource.size < 5 * 1024 * 1024;
+                            
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // 2. User Verification Documents (e.g., Carte Nationale, identity docs, banking info)
+    // Highly restricted: Accessible only by the account owner and administrators.
+    // Absolutely no public or unauthorized access.
+    match /users/{userId}/verification/{allPaths=**} {
+      allow read: if request.auth != null && (request.auth.uid == userId || request.auth.token.admin == true);
+      
+      // Allow uploading images or PDFs up to 10MB
+      allow create, update: if request.auth != null 
+                            && request.auth.uid == userId 
+                            && (request.resource.contentType.matches('image/.*') || request.resource.contentType == 'application/pdf')
+                            && request.resource.size < 10 * 1024 * 1024;
+                            
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // 3. Task-specific attachments and images
+    // All authenticated users can read task attachments (to view active tasks & listings)
+    // Only the authenticated poster (owner) of the task in Firestore is permitted to upload or modify task-specific files
+    match /tasks/{taskId}/{allPaths=**} {
+      allow read: if request.auth != null;
+      
+      allow create: if request.auth != null
+                    && get(/databases/(default)/documents/tasks/$(taskId)).data.posterId == request.auth.uid
+                    && request.resource.contentType.matches('image/.*')
+                    && request.resource.size < 10 * 1024 * 1024;
+                    
+      allow update: if request.auth != null
+                    && get(/databases/(default)/documents/tasks/$(taskId)).data.posterId == request.auth.uid;
+                    
+      allow delete: if request.auth != null
+                    && get(/databases/(default)/documents/tasks/$(taskId)).data.posterId == request.auth.uid;
+    }
+    
+    // 4. Public assets (read-only for all, write-only for admins)
+    match /public/{allPaths=**} {
+      allow read: if true;
+      allow write: if request.auth != null && request.auth.token.admin == true;
+    }
+  }
+}

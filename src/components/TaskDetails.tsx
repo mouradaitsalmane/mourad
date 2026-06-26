@@ -1,18 +1,15 @@
-import React, { useState, useEffect } from 'react';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { 
-  collection, 
-  doc, 
-  query, 
-  where, 
-  getDocs,
-  onSnapshot, 
-  setDoc, 
-  updateDoc,
-  serverTimestamp
-} from 'firebase/firestore';
+import React, { useState, useEffect, useRef } from 'react';
 import { Task, Offer, Review, UserProfile } from '../types';
 import { TRANSLATIONS, LanguageKey } from '../data/rabatData';
+import { useProfileCompletionStore } from '../store/profileCompletionStore';
+import { 
+  subscribeToTaskOffers, 
+  createBidService, 
+  acceptOfferService, 
+  releaseEscrowService, 
+  cancelTaskService 
+} from '../services/taskService';
+import { subscribeToTaskReviews, createReviewService } from '../services/reviewService';
 import { 
   X, 
   MapPin, 
@@ -31,6 +28,9 @@ import {
   CreditCard
 } from 'lucide-react';
 import PayzonePayment from './PayzonePayment';
+import SimpleChat from './SimpleChat';
+import { db } from '../lib/firebase';
+import { doc, updateDoc } from 'firebase/firestore';
 
 interface TaskDetailsProps {
   task: Task;
@@ -58,6 +58,13 @@ export default function TaskDetails({
   const [biddingLoading, setBiddingLoading] = useState(false);
   const [biddingError, setBiddingError] = useState<string | null>(null);
 
+  // Synchronous double-click guard refs
+  const biddingRef = useRef(false);
+  const acceptingRef = useRef(false);
+  const completingRef = useRef(false);
+  const cancellingRef = useRef(false);
+  const reviewingRef = useRef(false);
+
   // Status and Reviews States
   const [reviewRating, setReviewRating] = useState<number>(5);
   const [reviewComment, setReviewComment] = useState('');
@@ -68,6 +75,11 @@ export default function TaskDetails({
   // Custom Payzone States
   const [showPayzoneEscrow, setShowPayzoneEscrow] = useState(false);
 
+  // Chat States for Pre-assignment/Post-assignment
+  const [activeChatRoomId, setActiveChatRoomId] = useState<string | null>(null);
+  const [chatRecipientName, setChatRecipientName] = useState('');
+  const [chatRecipientId, setChatRecipientId] = useState('');
+
   const isPoster = user && task.posterId === user.uid;
   const isAssignedTasker = user && task.taskerId === user.uid;
   const alreadyBid = user && offers.some(o => o.taskerId === user.uid);
@@ -75,19 +87,11 @@ export default function TaskDetails({
 
   // 1. Fetch offers under tasks/taskId/offers in real-time
   useEffect(() => {
-    const offersRef = collection(db, 'tasks', task.id, 'offers');
-    const unsub = onSnapshot(
-      offersRef, 
-      (snapshot) => {
-        const list: Offer[] = [];
-        snapshot.forEach((subdoc) => {
-          list.push({ id: subdoc.id, ...subdoc.data() } as Offer);
-        });
+    const unsub = subscribeToTaskOffers(
+      task.id, 
+      (list) => {
         // Sort bids from lowest to highest
         setOffers(list.sort((a, b) => a.amount - b.amount));
-      },
-      (error) => {
-        handleFirestoreError(error, OperationType.LIST, `tasks/${task.id}/offers`);
       }
     );
 
@@ -96,19 +100,10 @@ export default function TaskDetails({
 
   // 2. Fetch associated reviews for this task
   useEffect(() => {
-    const reviewsRef = collection(db, 'reviews');
-    const q = query(reviewsRef, where('taskId', '==', task.id));
-    const unsub = onSnapshot(
-      q,
-      (snapshot) => {
-        const list: Review[] = [];
-        snapshot.forEach((d) => {
-          list.push({ id: d.id, ...d.data() } as Review);
-        });
+    const unsub = subscribeToTaskReviews(
+      task.id,
+      (list) => {
         setTaskReviews(list);
-      },
-      (error) => {
-        handleFirestoreError(error, OperationType.LIST, 'reviews');
       }
     );
     return () => unsub();
@@ -117,10 +112,38 @@ export default function TaskDetails({
   // 3. Submit dynamic Tasker Bid Offer
   const handlePlaceBid = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (biddingRef.current || biddingLoading) return;
     if (!user) {
       setBiddingError(t.mustLoginToBid);
       return;
     }
+
+    // 1. Bid protection: Block bids if profile completion < 80%
+    let score = userProfile?.profileCompletion ?? 0;
+    if (!score) {
+      let calculated = 0;
+      if (userProfile?.photoURL && userProfile?.photoURL.trim() !== '') calculated += 20;
+      if (userProfile?.phoneVerified === true) calculated += 20;
+      if (userProfile?.dob || userProfile?.hasDob === true) calculated += 10;
+      if (userProfile?.location || userProfile?.hasAddress === true) calculated += 10;
+      if (userProfile?.skills && userProfile.skills.length > 0) calculated += 10;
+      if (userProfile?.bio && userProfile?.headline) calculated += 10;
+      if (userProfile?.verificationStatus === 'approved' || userProfile?.identityVerified === true || userProfile?.isVerifiedTasker === true) calculated += 10;
+      if (userProfile?.hasBanking === true) calculated += 10;
+      score = Math.min(calculated, 100);
+    }
+
+    if (score < 80) {
+      const msgAr = `عذراً! لا يمكنك تقديم العروض حتى تكتمل نسبة توثيق وتعبئة ملفك الشخصي إلى 80٪ على الأقل (نسبتك الحالية: ${score}٪). يرجى إتمام الخطوات المتبقية الآن.`;
+      const msgFr = `Action requise! Vous ne pouvez pas soumettre d'offres tant que votre profil n'est pas complété à au moins 80% (votre niveau actuel: ${score}%). Veuillez compléter vos étapes maintenant.`;
+      const errMsg = lang === 'ar' ? msgAr : msgFr;
+      setBiddingError(errMsg);
+      
+      // Open the onboarding modal at step 1
+      useProfileCompletionStore.getState().openCompletionModal(1);
+      return;
+    }
+
     if (biddingAmount <= 0 || biddingAmount > 100000) {
       setBiddingError(lang === 'ar' ? 'العرض المقدم غير منطقي.' : 'Tarif de bid invalide.');
       return;
@@ -131,6 +154,7 @@ export default function TaskDetails({
     }
 
     try {
+      biddingRef.current = true;
       setBiddingLoading(true);
       setBiddingError(null);
 
@@ -142,27 +166,14 @@ export default function TaskDetails({
         taskerPhoto: user.photoURL || '',
         amount: Number(biddingAmount),
         message: biddingPitch.trim(),
-        status: 'pending',
-        createdAt: serverTimestamp()
+        status: 'pending'
       };
 
-      // Save Offer subcollection doc
-      const offerPath = `tasks/${task.id}/offers/${offerId}`;
       try {
-        await setDoc(doc(db, 'tasks', task.id, 'offers', offerId), offerData);
+        await createBidService({ ...offerData, taskId: task.id }, user.uid);
       } catch (err: any) {
-        handleFirestoreError(err, OperationType.WRITE, offerPath);
-      }
-
-      // Increment task's offersCount
-      const taskPath = `tasks/${task.id}`;
-      try {
-        await updateDoc(doc(db, 'tasks', task.id), {
-          offersCount: offers.length + 1,
-          updatedAt: serverTimestamp()
-        });
-      } catch (err: any) {
-        handleFirestoreError(err, OperationType.UPDATE, taskPath);
+        console.error('Secure Bid Error:', err);
+        throw err;
       }
 
       setBiddingPitch('');
@@ -172,65 +183,40 @@ export default function TaskDetails({
       setBiddingError(err.message || 'خطأ في حفظ العرض.');
     } finally {
       setBiddingLoading(false);
+      biddingRef.current = false;
     }
   };
 
   // 4. Accept a local Offer (Poster assignments action)
   const handleAcceptOffer = async (offer: Offer) => {
+    if (acceptingRef.current || biddingLoading) return;
     if (!user || task.posterId !== user.uid) return;
 
     try {
+      acceptingRef.current = true;
       setBiddingLoading(true);
 
-      // A) Update task to assigned state
-      const taskRef = doc(db, 'tasks', task.id);
-      await updateDoc(taskRef, {
-        status: 'assigned',
-        taskerId: offer.taskerId,
-        taskerName: offer.taskerName,
-        updatedAt: serverTimestamp()
-      });
-
-      // B) Update accepted offer status to 'accepted'
-      const acceptedOfferRef = doc(db, 'tasks', task.id, 'offers', offer.id);
-      await updateDoc(acceptedOfferRef, { status: 'accepted' });
-
-      // C) Update sibling offers status to 'declined'
-      for (const otherOffer of offers) {
-        if (otherOffer.id !== offer.id) {
-          const ref = doc(db, 'tasks', task.id, 'offers', otherOffer.id);
-          await updateDoc(ref, { status: 'declined' });
-        }
-      }
+      await acceptOfferService(task.id, offer.id, user.uid);
 
       onStatusChange();
     } catch (err: any) {
       console.error('Accept offer failure:', err);
-      handleFirestoreError(err, OperationType.UPDATE, `tasks/${task.id}`);
+      setBiddingError(err.message || 'Error occurred while securely accepting bid.');
     } finally {
       setBiddingLoading(false);
+      acceptingRef.current = false;
     }
   };
 
   // 5. Change task status to 'completed'
   const handleMarkCompleted = async () => {
+    if (completingRef.current || biddingLoading) return;
     if (!user || task.posterId !== user.uid) return;
     try {
+      completingRef.current = true;
       setBiddingLoading(true);
       
-      const res = await fetch('/api/tasks/release-escrow', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          taskId: task.id,
-          userUid: user.uid
-        })
-      });
-      
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to release escrow via secure Cloud Functions.');
-      }
+      await releaseEscrowService(task.id, user.uid);
       
       onStatusChange();
     } catch (error: any) {
@@ -238,30 +224,31 @@ export default function TaskDetails({
       setBiddingError(error.message || 'Error occurred during secure escrow release.');
     } finally {
       setBiddingLoading(false);
+      completingRef.current = false;
     }
   };
 
   // 6. Cancel task
   const handleCancelTask = async () => {
+    if (cancellingRef.current || biddingLoading) return;
     if (!user || (task.posterId !== user.uid && task.taskerId !== user.uid)) return;
     try {
+      cancellingRef.current = true;
       setBiddingLoading(true);
-      const taskRef = doc(db, 'tasks', task.id);
-      await updateDoc(taskRef, {
-        status: 'cancelled',
-        updatedAt: serverTimestamp()
-      });
+      await cancelTaskService(task.id, user.uid);
       onStatusChange();
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `tasks/${task.id}`);
+    } catch (error: any) {
+      alert(error.message || 'Error occurred during cancellation.');
     } finally {
       setBiddingLoading(false);
+      cancellingRef.current = false;
     }
   };
 
   // 7. Post Feedback Review inside completed task
   const handlePostReview = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (reviewingRef.current || reviewsLoading) return;
     if (!user) return;
     if (reviewComment.trim().length < 5) {
       setReviewsError(lang === 'ar' ? 'يرجى كتابة تعليق مفيد لا يقل عن 5 أحرف.' : 'Veuillez écrire un commentaire complet d\'au moins 5 caractères.');
@@ -269,48 +256,16 @@ export default function TaskDetails({
     }
 
     try {
+      reviewingRef.current = true;
       setReviewsLoading(true);
       setReviewsError(null);
 
-      const reviewId = 'review_' + task.id + '_' + user.uid;
-      const targetRevieweeId = isPoster ? (task.taskerId || '') : task.posterId;
-
-      const reviewData = {
+      await createReviewService({
         taskId: task.id,
-        reviewerId: user.uid,
-        reviewerName: userProfile?.displayName || user.displayName || 'مقيم تقييمات',
-        revieweeId: targetRevieweeId,
         rating: Number(reviewRating),
         comment: reviewComment.trim(),
-        createdAt: serverTimestamp()
-      };
-
-      // Create Review sheets doc
-      const reviewPath = `reviews/${reviewId}`;
-      try {
-        await setDoc(doc(db, 'reviews', reviewId), reviewData);
-      } catch (err: any) {
-        handleFirestoreError(err, OperationType.WRITE, reviewPath);
-      }
-
-      // Fetch all reviews for this target reviewee to update their profile stats
-      const q = query(collection(db, 'reviews'), where('revieweeId', '==', targetRevieweeId));
-      const querySnapshot = await getDocs(q);
-      let totalRating = 0;
-      let count = 0;
-      querySnapshot.forEach((docSnap) => {
-        totalRating += docSnap.data().rating;
-        count++;
-      });
-
-      // Calculate new score cleanly
-      const finalRating = count > 0 ? (totalRating / count) : Number(reviewRating);
-
-      // Save average score back on reviewee public profile doc
-      const userRef = doc(db, 'users', targetRevieweeId);
-      await updateDoc(userRef, {
-        rating: Number(finalRating.toFixed(2)),
-        reviewsCount: count
+        userUid: user.uid,
+        reviewerName: userProfile?.displayName || user.displayName || 'أحد الأعضاء بمهمات الرباط'
       });
 
       setReviewComment('');
@@ -320,6 +275,7 @@ export default function TaskDetails({
       setReviewsError(err.message || 'خطأ في حفظ التقييم.');
     } finally {
       setReviewsLoading(false);
+      reviewingRef.current = false;
     }
   };
 
@@ -420,7 +376,7 @@ export default function TaskDetails({
                 </div>
 
                 {/* Secure Escrow Budgeting with Payzone gate */}
-                <div className="p-4 rounded-2xl border border-gray-150-300 bg-slate-50 flex flex-col gap-3 text-right">
+                <div className="p-4 rounded-2xl border border-gray-200 bg-slate-50 flex flex-col gap-3 text-right">
                   <div className="flex items-center gap-2">
                     <div className="w-6 h-6 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center">
                       <CreditCard className="w-3.5 h-3.5" />
@@ -462,6 +418,23 @@ export default function TaskDetails({
                     </div>
                   )}
                 </div>
+
+                {/* Secure Direct Chat between Poster and Assigned Tasker */}
+                {user && (user.uid === task.posterId || user.uid === task.taskerId) && (
+                  <div className="mt-4 flex flex-col gap-2.5">
+                    <h5 className="text-[11px] font-black uppercase text-sky-850 tracking-wider">
+                      {lang === 'ar' ? '💬 الدردشة المباشرة مع الطرف الآخر' : '💬 Chat en direct'}
+                    </h5>
+                    <SimpleChat
+                      roomId={`${task.id}_${task.taskerId}`}
+                      currentUserId={user.uid}
+                      currentUserName={userProfile?.displayName || user.displayName || 'مستخدم الرباط'}
+                      recipientId={user.uid === task.posterId ? task.taskerId : task.posterId}
+                      recipientName={user.uid === task.posterId ? (task.taskerName || 'مقدم الخدمة') : (task.posterName || 'العميل')}
+                      lang={lang}
+                    />
+                  </div>
+                )}
               </div>
             )}
 
@@ -576,6 +549,33 @@ export default function TaskDetails({
             {/* 7. Display bids and offers list */}
             {(task.status === 'open' || task.status === 'held') && (
               <div className="flex flex-col gap-4 border-t border-gray-100 pt-5 pr-1">
+                {/* Active Bidder Chat Overlay */}
+                {activeChatRoomId && user && (
+                  <div className="mb-4 bg-white rounded-2xl border border-sky-100 p-4 shadow-sm animate-fade-in text-right">
+                    <div className="flex items-center justify-between mb-3 pb-2 border-b border-sky-50">
+                      <span className="text-xs font-black text-sky-850">
+                        {lang === 'ar' ? `💬 مناقشة وتفاوض العرض مع: ${chatRecipientName}` : `💬 Négociation en cours avec : ${chatRecipientName}`}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setActiveChatRoomId(null)}
+                        className="text-[11px] font-black text-rose-600 hover:text-rose-700 bg-rose-50 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+                      >
+                        {lang === 'ar' ? 'إغلاق المحادثة ×' : 'Fermer le chat ×'}
+                      </button>
+                    </div>
+                    <SimpleChat
+                      roomId={activeChatRoomId}
+                      currentUserId={user.uid}
+                      currentUserName={userProfile?.displayName || user.displayName || 'مستخدم الرباط'}
+                      recipientId={chatRecipientId}
+                      recipientName={chatRecipientName}
+                      lang={lang}
+                      onClose={() => setActiveChatRoomId(null)}
+                    />
+                  </div>
+                )}
+
                 <h4 className="text-sm font-bold text-gray-800 flex items-center gap-1.5 justify-start">
                   <MessageSquare className="w-4 h-4 text-sky-600" />
                   <span>{t.offersLabel} ({offers.length})</span>
@@ -613,14 +613,32 @@ export default function TaskDetails({
                             <span className="text-[9px] text-gray-400 font-medium">سعر عرض الخدمة</span>
                           </div>
 
-                          {isPoster && (task.status === 'open' || task.status === 'held') && (
-                            <button
-                              onClick={() => handleAcceptOffer(off)}
-                              className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
-                            >
-                              {t.assignTask}
-                            </button>
-                          )}
+                          <div className="flex items-center gap-2">
+                            {/* Chat button for Poster -> Bidder OR Bidder -> Poster */}
+                            {user && (isPoster || user.uid === off.taskerId) && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveChatRoomId(`${task.id}_${off.taskerId}`);
+                                  setChatRecipientId(isPoster ? off.taskerId : task.posterId);
+                                  setChatRecipientName(isPoster ? off.taskerName : task.posterName);
+                                }}
+                                className="bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-100/50 text-xs font-bold px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1 h-9"
+                              >
+                                <MessageSquare className="w-3.5 h-3.5" />
+                                <span>{lang === 'ar' ? 'دردشة' : 'Chat'}</span>
+                              </button>
+                            )}
+
+                            {isPoster && (task.status === 'open' || task.status === 'held') && (
+                              <button
+                                onClick={() => handleAcceptOffer(off)}
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors cursor-pointer h-9"
+                              >
+                                {t.assignTask}
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     ))}
